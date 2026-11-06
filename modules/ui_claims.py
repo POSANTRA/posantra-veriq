@@ -1,11 +1,13 @@
-"""POSANTRA | VERIQ - claim and evidence panel (Step 11).
+"""POSANTRA | VERIQ - claim and evidence panel (Step 11, updated in Step 12).
 
 Streamlit UI for the Claim / Evidence / Context / Assessment flow. Text from
-the web or from images is rendered as plain text, never as HTML.
+the web or from images is rendered as plain text, never as HTML. The render
+function returns the claims, evidence and verdict so reports can use them.
 """
 from __future__ import annotations
 
 import hashlib
+from typing import Optional
 
 import pandas as pd
 import streamlit as st
@@ -27,11 +29,11 @@ _TIER_OPTIONS = {_AUTO_TIER: None, **{f"{n}. {label}": n for n, label in sr.TIER
 def render_claim_investigation(sources: list[tuple[str, str]], key_prefix: str,
                                published: str = "", has_media: bool = False,
                                user_provided: bool = False,
-                               heading: str = "Claim Analysis") -> None:
+                               heading: str = "Claim Analysis") -> Optional[dict]:
     combined = "\n".join(text for _, text in sources if text)
     if not combined.strip():
         st.info("No text is available to analyse for claims.")
-        return
+        return None
 
     tag = hashlib.sha256(combined.encode("utf-8", errors="ignore")).hexdigest()[:12]
     base = f"{key_prefix}_{tag}"
@@ -43,7 +45,8 @@ def render_claim_investigation(sources: list[tuple[str, str]], key_prefix: str,
     _render_manual_form(base, claim_id, evidence)
     _render_evidence_table(base, evidence)
     _render_timeline(published, claims, evidence)
-    _render_assessment(claims, evidence, user_provided)
+    verdict = _render_assessment(claims, evidence, user_provided)
+    return {"claims": claims, "evidence": list(evidence), "verdict": verdict}
 
 
 def _render_claims(claims, heading: str) -> None:
@@ -192,7 +195,7 @@ def _render_timeline(published: str, claims, evidence: list) -> None:
         st.write("No dates are available yet.")
 
 
-def _render_assessment(claims, evidence: list, user_provided: bool) -> None:
+def _render_assessment(claims, evidence: list, user_provided: bool):
     st.markdown("#### Claim Assessment")
     verdict = ve.evaluate_claims(claims, evidence, user_provided)
     colour = _COLOURS.get(verdict.assessment, "#8b949e")
@@ -213,3 +216,4 @@ def _render_assessment(claims, evidence: list, user_provided: bool) -> None:
     with st.expander("Suggested manual checks"):
         for text in verdict.suggested_checks:
             st.markdown(f"- {text}")
+    return verdict

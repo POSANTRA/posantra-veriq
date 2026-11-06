@@ -1,11 +1,12 @@
-"""POSANTRA | VERIQ - local SQLite storage (Step 8).
+"""POSANTRA | VERIQ - local SQLite storage.
 
-Stores image fingerprints only (hashes, sanitised file name, dimensions,
-timestamps). The image content is never stored. All queries are
-parameterised.
+Stores image fingerprints (hashes, sanitised file name, dimensions, timestamps)
+and, only on explicit user action, investigation records. Uploaded image
+content is never stored. All queries are parameterised.
 """
 from __future__ import annotations
 
+import json
 import sqlite3
 from contextlib import closing
 from datetime import datetime, timezone
@@ -16,6 +17,7 @@ import config
 
 _SCHEMA_PATH = Path(__file__).with_name("schema.sql")
 MAX_RECORDS_COMPARED = 5000
+MAX_RECORD_BYTES = 2_000_000
 
 
 def _now() -> str:
@@ -30,6 +32,7 @@ def _connect() -> sqlite3.Connection:
     return conn
 
 
+# ------------------------------------------------------------- fingerprints
 def get_by_sha(sha256: str) -> Optional[dict]:
     with closing(_connect()) as conn:
         row = conn.execute(
@@ -74,4 +77,80 @@ def clear_fingerprints() -> int:
     with closing(_connect()) as conn:
         with conn:
             cursor = conn.execute("DELETE FROM fingerprints")
+            return cursor.rowcount
+
+
+# ----------------------------------------------------------- investigations
+def save_investigation(data: dict) -> None:
+    """Insert or update an investigation record (report data as JSON)."""
+    inv_id = str(data.get("investigation_id") or "")
+    if not inv_id:
+        raise ValueError("The record has no investigation ID.")
+    payload = json.dumps(data, ensure_ascii=False)
+    if len(payload.encode("utf-8")) > MAX_RECORD_BYTES:
+        raise ValueError("The record is too large to save.")
+    now = _now()
+    values = (
+        inv_id, now, now,
+        str(data.get("investigation_type") or "Unknown"),
+        str(data.get("input_hash") or ""),
+        str(data.get("input_label") or "")[:300],
+        str(data.get("headline") or "Not available"),
+        str(data.get("strength_summary") or "Not available"),
+        payload,
+    )
+    with closing(_connect()) as conn:
+        with conn:
+            conn.execute(
+                """
+                INSERT INTO investigations
+                    (id, created_at, updated_at, investigation_type, input_hash,
+                     input_label, assessment, evidence_strength, report_json)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+                ON CONFLICT(id) DO UPDATE SET
+                    updated_at = excluded.updated_at,
+                    investigation_type = excluded.investigation_type,
+                    input_hash = excluded.input_hash,
+                    input_label = excluded.input_label,
+                    assessment = excluded.assessment,
+                    evidence_strength = excluded.evidence_strength,
+                    report_json = excluded.report_json
+                """,
+                values,
+            )
+
+
+def list_investigations(limit: int = 100) -> list[dict]:
+    with closing(_connect()) as conn:
+        rows = conn.execute(
+            "SELECT id, created_at, investigation_type, input_label, assessment, "
+            "evidence_strength FROM investigations ORDER BY created_at DESC LIMIT ?",
+            (limit,),
+        ).fetchall()
+    return [dict(r) for r in rows]
+
+
+def get_investigation(inv_id: str) -> Optional[dict]:
+    with closing(_connect()) as conn:
+        row = conn.execute(
+            "SELECT report_json FROM investigations WHERE id = ?", (inv_id,)
+        ).fetchone()
+    if not row:
+        return None
+    try:
+        data = json.loads(row["report_json"])
+    except ValueError:
+        return None
+    return data if isinstance(data, dict) else None
+
+
+def count_investigations() -> int:
+    with closing(_connect()) as conn:
+        return int(conn.execute("SELECT COUNT(*) FROM investigations").fetchone()[0])
+
+
+def clear_investigations() -> int:
+    with closing(_connect()) as conn:
+        with conn:
+            cursor = conn.execute("DELETE FROM investigations")
             return cursor.rowcount

@@ -1,9 +1,9 @@
 """POSANTRA | VERIQ - Streamlit application.
 
-Step 11 state: image investigation (validation, metadata, OCR, forensic
-indicators, fingerprints, assessment, claims in image text) and post URL
-retrieval with a manual fallback, claim analysis, evidence search and
-claim assessment. Reports are added in a later step.
+Step 12 state: image investigation (validation, metadata, OCR, forensic
+indicators, fingerprints, assessment, claims in image text), post URL
+retrieval with manual fallback, claim analysis, evidence search and claim
+assessment, investigation reports and opt-in saved investigation records.
 """
 from __future__ import annotations
 
@@ -20,8 +20,10 @@ from modules import (
     metadata_analyzer,
     ocr_engine,
     post_extractor,
+    report_generator,
     security,
     ui_claims,
+    ui_report,
     url_validator,
     verdict_engine,
 )
@@ -190,13 +192,22 @@ def render_image_mode() -> None:
     render_forensics(forensics)
     render_hashes(hashes, comparison)
 
+    claim_result = None
     if ocr.status == config.STATUS_COMPLETED and ocr.text:
-        ui_claims.render_claim_investigation(
+        claim_result = ui_claims.render_claim_investigation(
             [("Text extracted from the image (OCR)", ocr.text)],
             key_prefix="img",
             has_media=True,
             heading="Context Investigation: Claims in the Image Text",
         )
+
+    ui_report.render_report_panel(
+        lambda rid: report_generator.build_image_report(
+            rid, validation, info, meta, ocr, forensics, hashes,
+            comparison, verdict, claim_result,
+        ),
+        report_key=f"img_{validation.sha256[:16]}",
+    )
 
 
 # ------------------------------------------------------------------ Summary
@@ -572,8 +583,10 @@ def render_url_mode() -> None:
         sources.append(("Text provided by you", manual.text))
         published = published or manual.published
         user_provided = True
+
+    claim_result = None
     if sources:
-        ui_claims.render_claim_investigation(
+        claim_result = ui_claims.render_claim_investigation(
             sources,
             key_prefix="url",
             published=published,
@@ -582,6 +595,17 @@ def render_url_mode() -> None:
         )
     elif state or manual is not None:
         st.info("No post text is available to investigate. Use the manual text box above.")
+
+    if state or manual is not None:
+        url_info = state["info"] if state else None
+        url_extraction = state["extraction"] if state else None
+        key = (report_generator.url_input_hash(url_info, manual) or "none")[:16]
+        ui_report.render_report_panel(
+            lambda rid: report_generator.build_url_report(
+                rid, url_info, url_extraction, manual, claim_result
+            ),
+            report_key=f"url_{key}",
+        )
 
 
 def render_post_result(state: dict) -> None:
@@ -680,13 +704,18 @@ def render_privacy_panel() -> None:
   can see that request. Nothing from your uploaded images is sent. Text you
   paste manually stays on this machine.
 - **Evidence search:** only when you click Search, the query text you can see
-  is sent to Wikipedia and the GDELT news index. Recorded evidence and claims
-  are kept for your current browser session only and are not written to disk.
-- **What is stored:** only if "Remember this image's fingerprint" is ticked:
+  is sent to Wikipedia and the GDELT news index.
+- **Fingerprints:** only if "Remember this image's fingerprint" is ticked:
   hashes, the sanitised file name, dimensions and timestamps, in a local SQLite
-  file. The image itself is never stored. Retrieved post content is kept only
-  for your current browser session and is not written to disk. Other
-  investigation records (findings, reports) are planned for later steps.
+  file. The image itself is never stored.
+- **Reports:** generated on request and downloaded by you. They do not contain
+  the uploaded image.
+- **Saved investigation records:** only when you click "Save investigation
+  record locally". A record holds metadata (including GPS if present), OCR or
+  post text, claims, evidence, assessments and limitations, in the same local
+  SQLite file. You can delete all records below.
+- **Session data:** retrieved post content, claims and recorded evidence are
+  kept for your current browser session only unless you save a record.
 - **Temporary files:** removed after each analysis.
 - **Advice:** avoid uploading highly sensitive or private material
   unless necessary.
@@ -726,6 +755,7 @@ def main() -> None:
 
     st.divider()
     render_privacy_panel()
+    ui_report.render_saved_records()
     render_disclaimer()
 
 
