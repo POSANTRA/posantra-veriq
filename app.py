@@ -1,8 +1,9 @@
 """POSANTRA | VERIQ - Streamlit application.
 
-Step 10 state: image investigation (validation, metadata, OCR, forensic
-indicators, fingerprints, assessment) and post URL retrieval with a manual
-fallback. Claim analysis, evidence search and reports are added in later steps.
+Step 11 state: image investigation (validation, metadata, OCR, forensic
+indicators, fingerprints, assessment, claims in image text) and post URL
+retrieval with a manual fallback, claim analysis, evidence search and
+claim assessment. Reports are added in a later step.
 """
 from __future__ import annotations
 
@@ -20,6 +21,7 @@ from modules import (
     ocr_engine,
     post_extractor,
     security,
+    ui_claims,
     url_validator,
     verdict_engine,
 )
@@ -187,6 +189,14 @@ def render_image_mode() -> None:
     render_ocr(ocr)
     render_forensics(forensics)
     render_hashes(hashes, comparison)
+
+    if ocr.status == config.STATUS_COMPLETED and ocr.text:
+        ui_claims.render_claim_investigation(
+            [("Text extracted from the image (OCR)", ocr.text)],
+            key_prefix="img",
+            has_media=True,
+            heading="Context Investigation: Claims in the Image Text",
+        )
 
 
 # ------------------------------------------------------------------ Summary
@@ -545,13 +555,33 @@ def render_url_mode() -> None:
         else:
             st.warning(manual.error or "No text was provided.")
 
-    if state or manual is not None:
-        st.markdown("#### Claim Analysis, Evidence Search, Timeline and Assessment")
-        st.info(
-            "Not available yet. Identifying claims and researching them against public "
-            "sources is added in Step 11. No assessment is made for URL investigations "
-            "at this stage."
+    sources, published, has_media, user_provided = [], "", False, False
+    if (
+        state
+        and state["extraction"] is not None
+        and state["extraction"].status == config.STATUS_COMPLETED
+    ):
+        ex = state["extraction"]
+        parts = [p for p in (ex.title, ex.text) if p]
+        if len(parts) == 2 and parts[0] == parts[1]:
+            parts = parts[:1]
+        if parts:
+            sources.append(("Retrieved post", "\n".join(parts)))
+        published, has_media = ex.published, bool(ex.media_urls)
+    if manual is not None and manual.status == config.STATUS_COMPLETED:
+        sources.append(("Text provided by you", manual.text))
+        published = published or manual.published
+        user_provided = True
+    if sources:
+        ui_claims.render_claim_investigation(
+            sources,
+            key_prefix="url",
+            published=published,
+            has_media=has_media,
+            user_provided=user_provided,
         )
+    elif state or manual is not None:
+        st.info("No post text is available to investigate. Use the manual text box above.")
 
 
 def render_post_result(state: dict) -> None:
@@ -649,6 +679,9 @@ def render_privacy_panel() -> None:
   site, and for X, YouTube and TikTok that platform's public oEmbed service,
   can see that request. Nothing from your uploaded images is sent. Text you
   paste manually stays on this machine.
+- **Evidence search:** only when you click Search, the query text you can see
+  is sent to Wikipedia and the GDELT news index. Recorded evidence and claims
+  are kept for your current browser session only and are not written to disk.
 - **What is stored:** only if "Remember this image's fingerprint" is ticked:
   hashes, the sanitised file name, dimensions and timestamps, in a local SQLite
   file. The image itself is never stored. Retrieved post content is kept only

@@ -13,6 +13,7 @@ from dataclasses import dataclass, field
 from typing import Optional
 
 import config
+from modules import source_research as sr
 from modules import metadata_analyzer as ma
 
 # ------------------------------------------------------------ fixed vocabulary
@@ -249,4 +250,99 @@ def evaluate(meta, ocr, forensics, hashes, comparison: Optional[dict] = None) ->
         suggested_checks=checks,
         incomplete_components=incomplete,
         context_checked=False,
+    )
+# ------------------------------------------------------- claim investigation
+CLAIM_LIMITATIONS = [
+    "VERIQ does not automatically judge whether a source supports or contradicts a "
+    "claim. The stances and explanations used here were recorded by a person.",
+    "Source tiers come from the web domain (or were set manually). A domain list is a "
+    "rough guide, not a verification of any individual article.",
+    "Search covered only Wikipedia and the GDELT news index. Finding nothing there "
+    "says nothing about whether other sources exist.",
+    "This assessment concerns the claim text. It does not determine who uploaded "
+    "content or where the uploader is.",
+]
+
+
+def evaluate_claims(claims: list, evidence: list, user_provided_text: bool = False) -> Verdict:
+    """Assess claim text from evidence recorded with a stance and an explanation."""
+    limitations = list(CLAIM_LIMITATIONS)
+    if user_provided_text:
+        limitations.append("Part of the investigated text was supplied by the user, so "
+                           "VERIQ cannot confirm it matches the original post.")
+
+    assessed = [e for e in evidence
+                if e.stance in (sr.SUPPORTS, sr.CONTRADICTS, sr.NEUTRAL)
+                and (e.explanation or "").strip()]
+    ignored = len(evidence) - len(assessed)
+
+    def reliable(e) -> bool:
+        return 1 <= e.tier <= sr.RELIABLE_MAX_TIER
+
+    support = [e for e in assessed if e.stance == sr.SUPPORTS and reliable(e)]
+    contra = [e for e in assessed if e.stance == sr.CONTRADICTS and reliable(e)]
+    earlier = [e for e in assessed if e.stance == sr.CONTRADICTS
+               and e.evidence_type == sr.TYPE_EARLIER and 1 <= e.tier <= 7]
+
+    def domains(items) -> int:
+        return len({e.domain for e in items})
+
+    findings = [
+        Finding("Evidence",
+                f"{e.stance}: {_clip(e.source_title)} ({_clip(e.domain)}; {e.tier_label}).",
+                INDICATES if reliable(e) and e.stance != sr.NEUTRAL else INFO)
+        for e in assessed
+    ]
+
+    if not claims and not evidence:
+        assessment, strength = INSUFFICIENT_EVIDENCE, STRENGTH_INSUFFICIENT
+        reason = ("No checkable claim was identified and no sources were recorded, so there "
+                  "is too little material for a meaningful investigation.")
+    elif earlier:
+        assessment = MISLEADING_CONTEXT
+        strength = STRENGTH_MODERATE if any(reliable(e) for e in earlier) else STRENGTH_LIMITED
+        reason = ("Recorded evidence indicates the media or claim was published earlier or "
+                  "in a different context than presented. The media itself may be genuine, "
+                  "but the context presented with it is contradicted. The earliest source "
+                  "found by VERIQ may not be the true original.")
+    elif support and contra:
+        assessment, strength = UNVERIFIED, STRENGTH_LIMITED
+        reason = ("Reliable sources were recorded on both sides: some support the claim and "
+                  "some contradict it. The evidence conflicts, so VERIQ cannot confirm or "
+                  "reject the claim.")
+    elif contra:
+        assessment = CONTRADICTED
+        strength = STRENGTH_HIGH if domains(contra) >= 2 else STRENGTH_MODERATE
+        reason = (f"{domains(contra)} reliable source domain(s) recorded as contradicting "
+                  "the claim, and none recorded as supporting it.")
+    elif support:
+        assessment = AUTHENTIC
+        strength = STRENGTH_HIGH if domains(support) >= 2 else STRENGTH_MODERATE
+        reason = (f"{domains(support)} reliable source domain(s) recorded as supporting the "
+                  "claim, and none recorded as contradicting it. This concerns the claim "
+                  "text. It does not by itself show that any attached image or video is "
+                  "unaltered or unrelated to an earlier event.")
+    elif assessed:
+        assessment, strength = UNVERIFIED, STRENGTH_LIMITED
+        reason = ("The recorded evidence is neutral, or comes from sources that are social "
+                  "posts, unclassified or otherwise below the reliability threshold. That is "
+                  "not enough reliable evidence to confirm or reject the claim.")
+    else:
+        assessment, strength = UNVERIFIED, STRENGTH_INSUFFICIENT
+        reason = ("Claims were identified, but no source has yet been recorded with a stance "
+                  "and explanation. Nothing has been confirmed or rejected.")
+
+    if ignored:
+        reason += (f" {ignored} recorded source(s) were not counted because they have no "
+                   "stance or explanation.")
+
+    return Verdict(
+        assessment=assessment, strength=strength, reason=reason, findings=findings,
+        limitations=limitations,
+        suggested_checks=[
+            "Compare the publication dates of the sources with the date the post claims.",
+            "Run a manual reverse image search for any attached image.",
+            "Look for the earliest publicly discovered appearance of the content.",
+        ],
+        context_checked=bool(assessed),
     )
