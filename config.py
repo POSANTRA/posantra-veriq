@@ -39,7 +39,8 @@ ALLOWED_EXTENSIONS = {".jpg", ".jpeg", ".png", ".webp"}
 ALLOWED_MIME_TYPES = {"image/jpeg", "image/png", "image/webp"}
 # ------------------------------------------------------------ Image limits
 MAX_IMAGE_PIXELS = 50_000_000     # reject images larger than this (decompression-bomb guard)
-
+# ------------------------------------------------------------------- OCR
+OCR_LANGUAGE = "eng"   # Tesseract language code(s), e.g. "eng" or "eng+hin" once installed
 # ------------------------------------------------- Analysis component status
 STATUS_COMPLETED = "Completed"
 STATUS_NOT_AVAILABLE = "Not available"

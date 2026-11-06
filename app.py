@@ -1,7 +1,7 @@
 """POSANTRA | VERIQ - Streamlit application.
 
-Step 5 state: image upload, validation, basic image information and
-metadata analysis. OCR, forensics, hashing, verdicts and URL
+Step 6 state: image upload, validation, basic image information,
+metadata analysis and OCR. Forensics, hashing, verdicts and URL
 investigation are added in later steps.
 """
 from __future__ import annotations
@@ -9,7 +9,7 @@ from __future__ import annotations
 import streamlit as st
 
 import config
-from modules import image_analyzer, metadata_analyzer, security
+from modules import image_analyzer, metadata_analyzer, ocr_engine, security
 
 st.set_page_config(
     page_title=config.PRODUCT_FULL_NAME,
@@ -135,6 +135,10 @@ def render_image_mode() -> None:
     meta = metadata_analyzer.analyze_metadata(data, validation.extension)
     render_metadata(meta)
 
+    with st.spinner("Running OCR..."):
+        ocr = ocr_engine.extract_text(data)
+    render_ocr(ocr)
+
 
 def render_media_information(data: bytes, validation, info) -> None:
     st.markdown("#### Media Information")
@@ -221,6 +225,34 @@ def render_metadata(meta) -> None:
     if meta.all_tags:
         with st.expander(f"All embedded tags ({len(meta.all_tags)})"):
             st.dataframe(meta.all_tags, hide_index=True)
+
+
+def render_ocr(ocr) -> None:
+    st.markdown("#### OCR")
+    st.caption(f"Status: {ocr.status}")
+
+    if ocr.status == config.STATUS_NOT_AVAILABLE:
+        st.warning(ocr.error or "OCR is not available.")
+        return
+    if ocr.status == config.STATUS_FAILED:
+        st.error(f"OCR failed: {ocr.error}")
+        return
+
+    if ocr.text:
+        st.markdown("**Extracted text**")
+        st.code(ocr.text, language=None)
+        col1, col2, col3 = st.columns(3)
+        col1.metric("Words read", ocr.word_count)
+        col2.metric(
+            "Mean confidence",
+            f"{ocr.mean_confidence}%" if ocr.mean_confidence is not None else "n/a",
+        )
+        col3.metric("Language model", ocr.language)
+    else:
+        st.write("No text was detected.")
+
+    for note in ocr.notes:
+        st.caption(note)
 
 
 # -------------------------------------------------------------- Mode: URL
