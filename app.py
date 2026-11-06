@@ -1,9 +1,8 @@
 """POSANTRA | VERIQ - Streamlit application.
 
-Step 8 state: image upload, validation, basic image information,
-metadata analysis, OCR, basic forensic indicators and image fingerprints
-with local similarity comparison. Verdicts and URL investigation are
-added in later steps.
+Step 10 state: image investigation (validation, metadata, OCR, forensic
+indicators, fingerprints, assessment) and post URL retrieval with a manual
+fallback. Claim analysis, evidence search and reports are added in later steps.
 """
 from __future__ import annotations
 
@@ -19,7 +18,10 @@ from modules import (
     image_analyzer,
     metadata_analyzer,
     ocr_engine,
+    post_extractor,
     security,
+    url_validator,
+    verdict_engine,
 )
 
 st.set_page_config(
@@ -65,9 +67,27 @@ CSS = """
     .status-ok  { color: #2ea36b; font-weight: 600; }
     .status-bad { color: #e5534b; font-weight: 600; }
     .muted { color: #8b949e; font-size: 0.85rem; }
+
+    .verdict-box {
+        background: #14181d; border: 1px solid #262c34; border-left: 4px solid #8b949e;
+        border-radius: 6px; padding: 1rem 1.2rem; margin-bottom: 0.8rem;
+    }
+    .verdict-label {
+        font-size: 0.75rem; letter-spacing: 0.12em; color: #8b949e; font-weight: 600;
+    }
+    .verdict-value { font-size: 1.6rem; font-weight: 700; letter-spacing: 0.04em; }
 </style>
 """
 st.markdown(CSS, unsafe_allow_html=True)
+
+VERDICT_COLOURS = {
+    verdict_engine.AUTHENTIC: "#2ea36b",
+    verdict_engine.MANIPULATED: "#e5534b",
+    verdict_engine.CONTRADICTED: "#e5534b",
+    verdict_engine.MISLEADING_CONTEXT: "#d29922",
+    verdict_engine.UNVERIFIED: "#d29922",
+    verdict_engine.INSUFFICIENT_EVIDENCE: "#8b949e",
+}
 
 
 # ------------------------------------------------------------------- Header
@@ -148,22 +168,61 @@ def render_image_mode() -> None:
         st.error(f"The image could not be analysed: {info.error}")
         return
 
-    render_media_information(data, validation, info)
-
-    meta = metadata_analyzer.analyze_metadata(data, validation.extension)
-    render_metadata(meta)
-
-    with st.spinner("Running OCR..."):
+    # Run every analysis first so the summary can be shown at the top.
+    with st.spinner("Analysing image..."):
+        meta = metadata_analyzer.analyze_metadata(data, validation.extension)
         ocr = ocr_engine.extract_text(data)
-    render_ocr(ocr)
-
-    with st.spinner("Computing forensic indicators..."):
         forensics = forensic_analyzer.analyze_forensics(data)
-    render_forensics(forensics)
-
-    with st.spinner("Computing fingerprints..."):
         hashes = hash_engine.compute_hashes(data)
-    render_hashes(hashes, validation, info, remember)
+
+    comparison = None
+    if hashes.status == config.STATUS_COMPLETED:
+        comparison = get_local_comparison(hashes, validation, info, remember)
+
+    verdict = verdict_engine.evaluate(meta, ocr, forensics, hashes, comparison)
+
+    render_summary(verdict)
+    render_media_information(data, validation, info)
+    render_metadata(meta)
+    render_ocr(ocr)
+    render_forensics(forensics)
+    render_hashes(hashes, comparison)
+
+
+# ------------------------------------------------------------------ Summary
+def render_summary(verdict) -> None:
+    st.markdown("#### Investigation Summary")
+    colour = VERDICT_COLOURS.get(verdict.assessment, "#8b949e")
+    # Only the fixed assessment label is placed in HTML. Everything derived from
+    # the uploaded file is rendered as plain text below.
+    st.markdown(
+        f'<div class="verdict-box" style="border-left-color:{colour}">'
+        f'<div class="verdict-label">ASSESSMENT</div>'
+        f'<div class="verdict-value" style="color:{colour}">{verdict.assessment}</div>'
+        f"</div>",
+        unsafe_allow_html=True,
+    )
+    st.markdown(f"**Evidence strength:** {verdict.strength}")
+    st.markdown("**Reason**")
+    st.write(verdict.reason)
+
+    if verdict.findings:
+        st.markdown("**Findings behind this assessment**")
+        st.table(
+            [{"Area": f.area, "Finding": f.text, "Weight": f.weight} for f in verdict.findings]
+        )
+    else:
+        st.caption("No findings were recorded.")
+
+    with st.expander("Limitations of this assessment"):
+        for text in verdict.limitations:
+            st.markdown(f"- {text}")
+    with st.expander("Suggested manual checks"):
+        for text in verdict.suggested_checks:
+            st.markdown(f"- {text}")
+
+    if not verdict.context_checked:
+        st.caption("Claim and context research: not performed in this investigation.")
 
 
 def render_media_information(data: bytes, validation, info) -> None:
@@ -356,10 +415,10 @@ def get_local_comparison(hashes, validation, info, remember: bool) -> dict:
     return result
 
 
-def render_hashes(hashes, validation, info, remember: bool) -> None:
+def render_hashes(hashes, comparison) -> None:
     st.markdown("#### Image Fingerprints and Local Comparison")
 
-    if hashes.status != config.STATUS_COMPLETED:
+    if hashes.status != config.STATUS_COMPLETED or comparison is None:
         st.error(f"Fingerprinting: {hashes.status}. {hashes.error or ''}")
         return
 
@@ -375,7 +434,6 @@ def render_hashes(hashes, validation, info, remember: bool) -> None:
     for note in hashes.notes:
         st.caption(note)
 
-    comparison = get_local_comparison(hashes, validation, info, remember)
     st.markdown("**Local comparison**")
 
     if not comparison["ok"]:
@@ -444,10 +502,140 @@ def clear_local_history() -> None:
 
 
 # -------------------------------------------------------------- Mode: URL
+def run_url_retrieval(raw: str) -> dict:
+    info = url_validator.parse_url(raw)
+    extraction = post_extractor.extract(info) if info.ok else None
+    return {"info": info, "extraction": extraction}
+
+
 def render_url_mode() -> None:
     st.subheader("Post URL Investigation")
     st.write("Enter a public social-media post URL.")
-    st.info("URL investigation will be enabled in Step 10.")
+
+    with st.form("veriq_url_form"):
+        raw = st.text_input(
+            "Public post URL",
+            placeholder="https://...",
+            max_chars=url_validator.MAX_URL_LENGTH,
+        )
+        submitted = st.form_submit_button("Retrieve public information")
+    st.caption(
+        "VERIQ requests the address from this machine, so the site (and, for X, YouTube "
+        "and TikTok, that platform's public oEmbed service) can see the request. It never "
+        "logs in or bypasses access restrictions."
+    )
+
+    if submitted:
+        with st.spinner("Retrieving publicly available information..."):
+            st.session_state["veriq_post"] = run_url_retrieval(raw)
+
+    state = st.session_state.get("veriq_post")
+    needs_fallback = True
+    if state:
+        render_post_result(state)
+        extraction = state["extraction"]
+        needs_fallback = extraction is None or extraction.status != config.STATUS_COMPLETED
+
+    render_manual_fallback(expanded=bool(state) and needs_fallback)
+
+    manual = st.session_state.get("veriq_manual")
+    if manual is not None:
+        if manual.status == config.STATUS_COMPLETED:
+            render_extracted_content(manual, "Text Provided by You")
+        else:
+            st.warning(manual.error or "No text was provided.")
+
+    if state or manual is not None:
+        st.markdown("#### Claim Analysis, Evidence Search, Timeline and Assessment")
+        st.info(
+            "Not available yet. Identifying claims and researching them against public "
+            "sources is added in Step 11. No assessment is made for URL investigations "
+            "at this stage."
+        )
+
+
+def render_post_result(state: dict) -> None:
+    info = state["info"]
+    extraction = state["extraction"]
+
+    st.markdown("#### URL Information")
+    if not info.ok:
+        st.error("This URL was not accepted.")
+        for message in info.errors:
+            st.markdown(f"- {message}")
+        return
+
+    st.table(
+        [
+            {"Field": "Submitted URL (normalised)", "Value": info.normalized},
+            {"Field": "Detected platform", "Value": info.platform_name},
+            {"Field": "Retrieval status", "Value": extraction.status},
+            {"Field": "Retrieval method", "Value": extraction.method or "None"},
+        ]
+    )
+    for note in info.notes:
+        st.caption(note)
+
+    if extraction.attempts:
+        with st.expander("Retrieval attempts"):
+            for attempt in extraction.attempts:
+                st.text(attempt)
+
+    if extraction.status == config.STATUS_COMPLETED:
+        render_extracted_content(extraction, "Extracted Content")
+    else:
+        if extraction.error:
+            st.warning(extraction.error)
+        if extraction.fallback_message:
+            st.info(extraction.fallback_message)
+        for note in extraction.notes:
+            st.caption(note)
+
+
+def render_extracted_content(extraction, heading: str) -> None:
+    st.markdown(f"#### {heading}")
+    if extraction.text:
+        st.markdown("**Post text**")
+        st.text(extraction.text)
+    else:
+        st.write("No post text was retrieved.")
+
+    rows = [
+        ("Title", extraction.title),
+        ("Author / account", extraction.author),
+        ("Author link", extraction.author_url),
+        ("Site", extraction.site_name),
+        ("Date as reported by the source", extraction.published),
+    ]
+    rows = [{"Field": k, "Value": v} for k, v in rows if v]
+    if rows:
+        st.table(rows)
+
+    if extraction.media_urls:
+        st.markdown("**Media references (not downloaded)**")
+        st.table([{"Reference": url} for url in extraction.media_urls])
+    elif not extraction.user_provided:
+        st.caption("No media references were found.")
+
+    for note in extraction.notes:
+        st.caption(note)
+
+
+def render_manual_fallback(expanded: bool) -> None:
+    with st.expander("Provide the post text manually", expanded=expanded):
+        with st.form("veriq_manual_form"):
+            text = st.text_area(
+                "Post text", max_chars=post_extractor.MAX_TEXT_CHARS, height=160
+            )
+            author = st.text_input("Author / account (optional)", max_chars=200)
+            posted = st.text_input("Date or time shown on the post (optional)", max_chars=100)
+            use_text = st.form_submit_button("Use this text")
+        if use_text:
+            st.session_state["veriq_manual"] = post_extractor.from_manual(text, author, posted)
+        st.caption(
+            "You can also switch to IMAGE INVESTIGATION and upload a screenshot or the "
+            "post's image."
+        )
 
 
 # ------------------------------------------------------ Privacy/disclaimer
@@ -457,10 +645,15 @@ def render_privacy_panel() -> None:
             f"""
 - **What is processed:** images you upload, analysed on this machine.
 - **Where:** locally. Uploaded images are not sent to external services.
+- **Post URL mode:** the URL you submit is requested from this machine. The
+  site, and for X, YouTube and TikTok that platform's public oEmbed service,
+  can see that request. Nothing from your uploaded images is sent. Text you
+  paste manually stays on this machine.
 - **What is stored:** only if "Remember this image's fingerprint" is ticked:
   hashes, the sanitised file name, dimensions and timestamps, in a local SQLite
-  file. The image itself is never stored. Other investigation records
-  (findings, reports) are planned for later steps.
+  file. The image itself is never stored. Retrieved post content is kept only
+  for your current browser session and is not written to disk. Other
+  investigation records (findings, reports) are planned for later steps.
 - **Temporary files:** removed after each analysis.
 - **Advice:** avoid uploading highly sensitive or private material
   unless necessary.
