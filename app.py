@@ -1,16 +1,21 @@
 """POSANTRA | VERIQ - Streamlit application.
 
-Step 7 state: image upload, validation, basic image information,
-metadata analysis, OCR and basic forensic indicators. Hashing, verdicts
-and URL investigation are added in later steps.
+Step 8 state: image upload, validation, basic image information,
+metadata analysis, OCR, basic forensic indicators and image fingerprints
+with local similarity comparison. Verdicts and URL investigation are
+added in later steps.
 """
 from __future__ import annotations
+
+import sqlite3
 
 import streamlit as st
 
 import config
+from database import database as local_db
 from modules import (
     forensic_analyzer,
+    hash_engine,
     image_analyzer,
     metadata_analyzer,
     ocr_engine,
@@ -114,6 +119,13 @@ def render_image_mode() -> None:
     st.subheader("Image Investigation")
     st.write("Upload a JPG, JPEG, PNG or WebP image.")
 
+    remember = st.checkbox(
+        "Remember this image's fingerprint locally so future uploads can be compared against it",
+        value=True,
+        help="Only hashes, the file name, dimensions and timestamps are stored on this "
+        "machine. The image itself is never stored.",
+    )
+
     uploaded = st.file_uploader(
         "Image",
         type=[ext.lstrip(".") for ext in sorted(config.ALLOWED_EXTENSIONS)],
@@ -148,6 +160,10 @@ def render_image_mode() -> None:
     with st.spinner("Computing forensic indicators..."):
         forensics = forensic_analyzer.analyze_forensics(data)
     render_forensics(forensics)
+
+    with st.spinner("Computing fingerprints..."):
+        hashes = hash_engine.compute_hashes(data)
+    render_hashes(hashes, validation, info, remember)
 
 
 def render_media_information(data: bytes, validation, info) -> None:
@@ -301,6 +317,132 @@ def render_forensics(result) -> None:
         st.caption(text)
 
 
+# ------------------------------------------------- Fingerprints and history
+def get_local_comparison(hashes, validation, info, remember: bool) -> dict:
+    """Compare against local history once per image per session, then save.
+
+    The comparison is computed BEFORE saving and cached, so Streamlit reruns
+    never report an image as a "previous" sighting of itself.
+    """
+    cache = st.session_state.setdefault("veriq_cmp", {})
+    saved = st.session_state.setdefault("veriq_saved", set())
+    sha = hashes.sha256
+
+    if sha not in cache:
+        try:
+            exact = local_db.get_by_sha(sha)
+            records = local_db.all_fingerprints()
+            cache[sha] = {
+                "ok": True,
+                "exact": exact,
+                "matches": hash_engine.compare_to_records(hashes, records),
+                "total": len(records),
+            }
+        except sqlite3.Error:
+            cache[sha] = {"ok": False}
+
+    result = cache[sha]
+    result["saved"] = sha in saved
+    if remember and result["ok"] and sha not in saved:
+        try:
+            local_db.save_fingerprint(
+                sha, hashes.ahash, hashes.phash, hashes.dhash,
+                validation.safe_name, info.width, info.height,
+            )
+            saved.add(sha)
+            result["saved"] = True
+        except sqlite3.Error:
+            result["save_failed"] = True
+    return result
+
+
+def render_hashes(hashes, validation, info, remember: bool) -> None:
+    st.markdown("#### Image Fingerprints and Local Comparison")
+
+    if hashes.status != config.STATUS_COMPLETED:
+        st.error(f"Fingerprinting: {hashes.status}. {hashes.error or ''}")
+        return
+
+    st.caption(f"Status: {hashes.status}")
+    st.table(
+        [
+            {"Hash": "SHA-256 (exact file)", "Value": hashes.sha256},
+            {"Hash": "aHash (average)", "Value": hashes.ahash},
+            {"Hash": "pHash (perceptual)", "Value": hashes.phash},
+            {"Hash": "dHash (difference)", "Value": hashes.dhash},
+        ]
+    )
+    for note in hashes.notes:
+        st.caption(note)
+
+    comparison = get_local_comparison(hashes, validation, info, remember)
+    st.markdown("**Local comparison**")
+
+    if not comparison["ok"]:
+        st.warning("The local fingerprint history could not be read, so no comparison was made.")
+        return
+
+    exact = comparison["exact"]
+    if exact:
+        st.info(
+            f"A byte-identical file (same SHA-256) was analysed before by this VERIQ "
+            f"installation. First recorded: {exact['first_seen']} UTC, as "
+            f"'{exact['filename']}', {exact['times_seen']} time(s). This shows only that "
+            "VERIQ has seen this file before. It says nothing about where the file came from."
+        )
+
+    matches = comparison["matches"]
+    if matches:
+        st.warning(
+            "Visually similar images were found in this installation's history. "
+            "Similar images may be copies, resized versions or unrelated look-alikes, "
+            "so compare them yourself."
+        )
+        st.table(
+            [
+                {
+                    "Similarity": m.level,
+                    "pHash distance": m.phash_distance,
+                    "dHash distance": m.dhash_distance,
+                    "aHash distance": m.ahash_distance,
+                    "Recorded name": m.filename,
+                    "First recorded (UTC)": m.first_seen,
+                }
+                for m in matches
+            ]
+        )
+        st.caption("Distances count differing bits out of 64. Smaller means more similar.")
+    elif not exact:
+        st.write(
+            f"No visually similar image was found among {comparison['total']} "
+            "locally stored fingerprint(s)."
+        )
+
+    if comparison.get("save_failed"):
+        st.caption("The fingerprint could not be saved locally.")
+    elif comparison["saved"]:
+        st.caption("This image's fingerprint (hashes only, not the image) is saved locally.")
+    else:
+        st.caption("This image's fingerprint was not saved.")
+
+    st.caption(
+        "Comparison covers only images analysed by this installation. It is not a "
+        "reverse image search of the internet, so \"no match\" does not mean the image "
+        "is original. Wider reverse-image research is an optional future integration."
+    )
+
+
+def clear_local_history() -> None:
+    try:
+        removed = local_db.clear_fingerprints()
+    except sqlite3.Error:
+        st.error("The local history could not be cleared.")
+        return
+    st.session_state.pop("veriq_cmp", None)
+    st.session_state.pop("veriq_saved", None)
+    st.success(f"Cleared {removed} stored fingerprint(s). Re-upload an image to refresh results.")
+
+
 # -------------------------------------------------------------- Mode: URL
 def render_url_mode() -> None:
     st.subheader("Post URL Investigation")
@@ -315,14 +457,23 @@ def render_privacy_panel() -> None:
             f"""
 - **What is processed:** images you upload, analysed on this machine.
 - **Where:** locally. Uploaded images are not sent to external services.
-- **What is stored:** only investigation records (planned: hashes,
-  extracted metadata, findings). Uploaded files are not kept permanently.
+- **What is stored:** only if "Remember this image's fingerprint" is ticked:
+  hashes, the sanitised file name, dimensions and timestamps, in a local SQLite
+  file. The image itself is never stored. Other investigation records
+  (findings, reports) are planned for later steps.
 - **Temporary files:** removed after each analysis.
 - **Advice:** avoid uploading highly sensitive or private material
   unless necessary.
 - **Limit:** files up to {config.MAX_UPLOAD_MB} MB.
 """
         )
+        try:
+            stored = local_db.count_fingerprints()
+            st.caption(f"Fingerprints currently stored locally: {stored}")
+        except sqlite3.Error:
+            st.caption("The local history could not be read.")
+        if st.button("Clear local fingerprint history"):
+            clear_local_history()
 
 
 def render_disclaimer() -> None:
