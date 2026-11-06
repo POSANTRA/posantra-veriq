@@ -222,6 +222,14 @@ def render_metadata(meta) -> None:
         with st.expander(f"All embedded tags ({len(meta.all_tags)})"):
             st.dataframe(meta.all_tags, hide_index=True)
 
+
+# -------------------------------------------------------------- Mode: URL
+def render_url_mode() -> None:
+    st.subheader("Post URL Investigation")
+    st.write("Enter a public social-media post URL.")
+    st.info("URL investigation will be enabled in Step 10.")
+
+
 # ------------------------------------------------------ Privacy/disclaimer
 def render_privacy_panel() -> None:
     with st.expander("Privacy and data handling"):
