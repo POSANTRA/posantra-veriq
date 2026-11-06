@@ -1,15 +1,21 @@
 """POSANTRA | VERIQ - Streamlit application.
 
-Step 6 state: image upload, validation, basic image information,
-metadata analysis and OCR. Forensics, hashing, verdicts and URL
-investigation are added in later steps.
+Step 7 state: image upload, validation, basic image information,
+metadata analysis, OCR and basic forensic indicators. Hashing, verdicts
+and URL investigation are added in later steps.
 """
 from __future__ import annotations
 
 import streamlit as st
 
 import config
-from modules import image_analyzer, metadata_analyzer, ocr_engine, security
+from modules import (
+    forensic_analyzer,
+    image_analyzer,
+    metadata_analyzer,
+    ocr_engine,
+    security,
+)
 
 st.set_page_config(
     page_title=config.PRODUCT_FULL_NAME,
@@ -139,6 +145,10 @@ def render_image_mode() -> None:
         ocr = ocr_engine.extract_text(data)
     render_ocr(ocr)
 
+    with st.spinner("Computing forensic indicators..."):
+        forensics = forensic_analyzer.analyze_forensics(data)
+    render_forensics(forensics)
+
 
 def render_media_information(data: bytes, validation, info) -> None:
     st.markdown("#### Media Information")
@@ -253,6 +263,42 @@ def render_ocr(ocr) -> None:
 
     for note in ocr.notes:
         st.caption(note)
+
+
+def render_forensics(result) -> None:
+    st.markdown("#### Forensic Indicators")
+
+    if result.status != config.STATUS_COMPLETED:
+        st.error(f"Forensic analysis: {result.status}. {result.error or ''}")
+        return
+
+    st.caption(
+        "Forensic indicators are technical observations, not proof of manipulation."
+    )
+    st.table(
+        [
+            {
+                "Indicator": ind.name,
+                "Status": ind.status,
+                "Finding": ind.summary,
+                "Worth a closer look": "Yes" if ind.significance == "observation" else "No",
+            }
+            for ind in result.indicators
+        ]
+    )
+
+    with st.expander("What each indicator means"):
+        for ind in result.indicators:
+            if ind.detail:
+                st.markdown(f"**{ind.name}.** {ind.detail}")
+
+    if result.ela_png:
+        with st.expander("ELA heatmap (brighter = larger change when re-saved)"):
+            st.image(result.ela_png, use_container_width=True)
+
+    st.markdown("**Limitations**")
+    for text in result.limitations:
+        st.caption(text)
 
 
 # -------------------------------------------------------------- Mode: URL
