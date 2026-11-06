@@ -37,6 +37,15 @@ MAX_UPLOAD_MB = 10
 MAX_UPLOAD_BYTES = MAX_UPLOAD_MB * 1024 * 1024
 ALLOWED_EXTENSIONS = {".jpg", ".jpeg", ".png", ".webp"}
 ALLOWED_MIME_TYPES = {"image/jpeg", "image/png", "image/webp"}
+# ------------------------------------------------------------ Image limits
+MAX_IMAGE_PIXELS = 50_000_000     # reject images larger than this (decompression-bomb guard)
+
+# ------------------------------------------------- Analysis component status
+STATUS_COMPLETED = "Completed"
+STATUS_NOT_AVAILABLE = "Not available"
+STATUS_NOT_APPLICABLE = "Not applicable"
+STATUS_FAILED = "Failed"
+STATUS_MANUAL = "Requires manual investigation"
 
 # ---------------------------------------------------------------- Timeouts
 REQUEST_TIMEOUT_SECONDS = 10      # outbound HTTP (Phase 1, Mode B)

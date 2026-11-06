@@ -8,6 +8,7 @@ from __future__ import annotations
 import streamlit as st
 
 import config
+from modules import image_analyzer, security
 
 st.set_page_config(
     page_title=config.PRODUCT_FULL_NAME,
@@ -82,8 +83,54 @@ def render_tool_status() -> None:
 def render_image_mode() -> None:
     st.subheader("Image Investigation")
     st.write("Upload a JPG, JPEG, PNG or WebP image.")
-    st.info("Image upload and analysis will be enabled in Step 4.")
 
+    uploaded = st.file_uploader(
+        "Image",
+        type=[ext.lstrip(".") for ext in sorted(config.ALLOWED_EXTENSIONS)],
+        label_visibility="collapsed",
+    )
+    if uploaded is None:
+        st.caption(f"Maximum file size: {config.MAX_UPLOAD_MB} MB.")
+        return
+
+    data = uploaded.getvalue()
+    validation = security.validate_upload(uploaded.name, data)
+    if not validation.ok:
+        st.error("This file was rejected during validation.")
+        for message in validation.errors:
+            st.markdown(f"- {message}")
+        return
+
+    info = image_analyzer.analyze_basic(data, validation.detected_mime)
+    if info.status != config.STATUS_COMPLETED:
+        st.error(f"The image could not be analysed: {info.error}")
+        return
+
+    render_media_information(data, validation, info)
+
+
+def render_media_information(data: bytes, validation, info) -> None:
+    st.markdown("#### Media Information")
+    left, right = st.columns([1, 2])
+    with left:
+        st.image(data, use_container_width=True)
+    with right:
+        rows = [
+            ("File name", validation.safe_name),
+            ("Detected type", validation.detected_mime),
+            ("Format (decoder)", info.format),
+            ("File size", f"{validation.size_bytes:,} bytes"),
+            ("Dimensions", f"{info.width} x {info.height} px"),
+            ("Megapixels", str(info.megapixels)),
+            ("Colour mode", f"{info.mode} ({info.channels} channels)"),
+            ("Transparency", "Yes" if info.has_alpha else "No"),
+            ("Animated", f"Yes ({info.frames} frames)" if info.animated else "No"),
+            ("Average colour (RGB)", str(info.mean_rgb) if info.mean_rgb else "Not available"),
+        ]
+        st.table([{"Field": k, "Value": v} for k, v in rows])
+        st.markdown("**SHA-256**")
+        st.code(validation.sha256, language=None)
+    st.caption("Validation passed. This image was decoded locally and is not stored.")
 
 # -------------------------------------------------------------- Mode: URL
 def render_url_mode() -> None:
