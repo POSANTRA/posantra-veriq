@@ -1,0 +1,9 @@
+streamlit>=1.40
+Pillow>=10.4
+numpy>=1.26
+opencv-python-headless>=4.10
+imagehash>=4.3
+pytesseract>=0.3.13
+requests>=2.32
+beautifulsoup4>=4.12
+pytest>=8.0

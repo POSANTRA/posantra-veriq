@@ -1,0 +1,18 @@
+# Python
+__pycache__/
+*.pyc
+.venv/
+.pytest_cache/
+
+# VERIQ runtime data (never commit user content)
+uploads/*
+!uploads/.gitkeep
+reports/*
+!reports/.gitkeep
+database/*.db
+database/*.db-journal
+
+# Environment / editor
+.env
+.vscode/
+.idea/
