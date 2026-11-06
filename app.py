@@ -1,14 +1,15 @@
-"""POSANTRA | VERIQ - Streamlit application shell (Step 3).
+"""POSANTRA | VERIQ - Streamlit application.
 
-No analysis is performed here yet. This stage provides the layout,
-mode selection, tool-status reporting and privacy/disclaimer text.
+Step 5 state: image upload, validation, basic image information and
+metadata analysis. OCR, forensics, hashing, verdicts and URL
+investigation are added in later steps.
 """
 from __future__ import annotations
 
 import streamlit as st
 
 import config
-from modules import image_analyzer, security
+from modules import image_analyzer, metadata_analyzer, security
 
 st.set_page_config(
     page_title=config.PRODUCT_FULL_NAME,
@@ -33,9 +34,29 @@ CSS = """
         font-size: 2rem; font-weight: 700; letter-spacing: 0.06em;
         color: #f2f4f7; margin: 0; line-height: 1.3;
     }
-    ...rest unchanged...
+    .veriq-title .sep { color: #2ea36b; padding: 0 0.35rem; }
+    .veriq-category {
+        color: #8b949e; font-size: 0.95rem; margin: 0.2rem 0 0 0;
+    }
+    .veriq-tagline {
+        color: #2ea36b; font-weight: 600; letter-spacing: 0.08em;
+        font-size: 0.9rem; margin-top: 0.4rem;
+    }
+
+    .veriq-panel {
+        background: #14181d; border: 1px solid #262c34;
+        border-radius: 6px; padding: 1rem 1.2rem; margin-bottom: 1rem;
+    }
+    .veriq-panel h4 {
+        margin: 0 0 0.5rem 0; font-size: 0.8rem; font-weight: 600;
+        letter-spacing: 0.1em; text-transform: uppercase; color: #8b949e;
+    }
+    .status-ok  { color: #2ea36b; font-weight: 600; }
+    .status-bad { color: #e5534b; font-weight: 600; }
+    .muted { color: #8b949e; font-size: 0.85rem; }
 </style>
 """
+st.markdown(CSS, unsafe_allow_html=True)
 
 
 # ------------------------------------------------------------------- Header
@@ -70,11 +91,14 @@ def render_tool_status() -> None:
         else:
             badge = '<span class="status-bad">● Not available</span>'
             detail = "Related analysis will be reported as not available."
-        rows.append(f"<div>{badge} &nbsp; <b>{label}</b> "
-                    f"<span class='muted'>{detail}</span></div>")
+        rows.append(
+            f"<div>{badge} &nbsp; <b>{label}</b> "
+            f"<span class='muted'>{detail}</span></div>"
+        )
     st.markdown(
         '<div class="veriq-panel"><h4>Analysis components</h4>'
-        + "".join(rows) + "</div>",
+        + "".join(rows)
+        + "</div>",
         unsafe_allow_html=True,
     )
 
@@ -108,6 +132,9 @@ def render_image_mode() -> None:
 
     render_media_information(data, validation, info)
 
+    meta = metadata_analyzer.analyze_metadata(data, validation.extension)
+    render_metadata(meta)
+
 
 def render_media_information(data: bytes, validation, info) -> None:
     st.markdown("#### Media Information")
@@ -125,19 +152,75 @@ def render_media_information(data: bytes, validation, info) -> None:
             ("Colour mode", f"{info.mode} ({info.channels} channels)"),
             ("Transparency", "Yes" if info.has_alpha else "No"),
             ("Animated", f"Yes ({info.frames} frames)" if info.animated else "No"),
-            ("Average colour (RGB)", str(info.mean_rgb) if info.mean_rgb else "Not available"),
+            (
+                "Average colour (RGB)",
+                str(info.mean_rgb) if info.mean_rgb else "Not available",
+            ),
         ]
         st.table([{"Field": k, "Value": v} for k, v in rows])
         st.markdown("**SHA-256**")
         st.code(validation.sha256, language=None)
     st.caption("Validation passed. This image was decoded locally and is not stored.")
 
-# -------------------------------------------------------------- Mode: URL
-def render_url_mode() -> None:
-    st.subheader("Post URL Investigation")
-    st.write("Enter a public social-media post URL.")
-    st.info("URL investigation will be enabled in Step 10.")
 
+def render_metadata(meta) -> None:
+    st.markdown("#### Metadata")
+
+    if meta.status != config.STATUS_COMPLETED:
+        st.warning(f"Metadata analysis: {meta.status}. {meta.error or ''}")
+        return
+
+    st.caption(f"Status: {meta.status}  |  Source: {meta.source}")
+
+    cc = meta.content_credentials
+    if cc:
+        st.markdown("**Content Credentials (C2PA) found**")
+        ai_declared = any("AI" in s for s in cc["digital_source_types"])
+        message = (
+            "The file carries an embedded provenance manifest"
+            + (" that declares AI-generated content" if ai_declared else "")
+            + ". VERIQ reads these claims but has not validated the signature."
+        )
+        (st.warning if ai_declared else st.info)(message)
+        rows = [
+            ("Declared source type", ", ".join(cc["digital_source_types"]) or "Not stated"),
+            ("Software agent", cc["software_agent"] or "Not stated"),
+            ("Manifest generator", cc["generator"] or "Not stated"),
+            ("Recorded actions", ", ".join(cc["actions"]) or "Not stated"),
+            ("Action timestamps", ", ".join(cc["when"]) or "Not stated"),
+        ]
+        st.table([{"Field": k, "Value": v} for k, v in rows])
+
+    st.markdown("**Metadata found**")
+    if meta.found:
+        st.table([{"Field": k, "Value": v} for k, v in meta.found.items()])
+    else:
+        st.write("None of the key fields below were found.")
+
+    st.markdown("**Metadata absent**")
+    if meta.absent:
+        st.write(", ".join(meta.absent))
+    else:
+        st.write("All key fields were present.")
+
+    st.markdown("**GPS location (embedded metadata)**")
+    if meta.gps:
+        st.warning(
+            f"Embedded coordinates: {meta.gps['latitude']:.6f}, {meta.gps['longitude']:.6f}. "
+            "This is metadata stored inside the file. It may be modified, copied from "
+            "another file or unreliable, and it does not show where the uploader is."
+        )
+        if meta.gps["warning"]:
+            st.error(meta.gps["warning"])
+    else:
+        st.write("No GPS metadata was found.")
+
+    for note in meta.notes:
+        st.caption(note)
+
+    if meta.all_tags:
+        with st.expander(f"All embedded tags ({len(meta.all_tags)})"):
+            st.dataframe(meta.all_tags, hide_index=True)
 
 # ------------------------------------------------------ Privacy/disclaimer
 def render_privacy_panel() -> None:
@@ -157,9 +240,7 @@ def render_privacy_panel() -> None:
 
 
 def render_disclaimer() -> None:
-    st.markdown(
-        f'<p class="muted">{config.DISCLAIMER}</p>', unsafe_allow_html=True
-    )
+    st.markdown(f'<p class="muted">{config.DISCLAIMER}</p>', unsafe_allow_html=True)
 
 
 # --------------------------------------------------------------------- Main
