@@ -16,6 +16,7 @@ import config
 from modules import claim_analyzer as ca
 from modules import source_research as sr
 from modules import verdict_engine as ve
+from modules import ui_theme
 
 _COLOURS = {
     ve.AUTHENTIC: "#2ea36b", ve.MANIPULATED: "#e5534b", ve.CONTRADICTED: "#e5534b",
@@ -172,13 +173,15 @@ def _render_evidence_table(base: str, evidence: list) -> None:
     if not evidence:
         st.write("No sources have been recorded yet.")
         return
-    st.dataframe(pd.DataFrame([{
-        "Stance": e.stance, "Source": e.source_title, "Domain": e.domain,
-        "Source tier": e.tier_label, "Type": e.evidence_type, "Published": e.published,
-        "Retrieved": e.retrieved, "Claim": e.relevance, "Why it matters": e.explanation,
-        "Added by": e.added_by, "URL": e.url,
-    } for e in evidence]), hide_index=True, use_container_width=True,
-        column_config={"URL": st.column_config.LinkColumn()})
+    ui_theme.render_source_cards(evidence)
+    with st.expander("Show evidence as a table"):
+        st.dataframe(pd.DataFrame([{
+            "Stance": e.stance, "Source": e.source_title, "Domain": e.domain,
+            "Source tier": e.tier_label, "Type": e.evidence_type, "Published": e.published,
+            "Retrieved": e.retrieved, "Claim": e.relevance, "Why it matters": e.explanation,
+            "Added by": e.added_by, "URL": e.url,
+        } for e in evidence]), hide_index=True, use_container_width=True,
+            column_config={"URL": st.column_config.LinkColumn()})
     if st.button("Clear all recorded evidence", key=f"clear_{base}"):
         evidence.clear()
         st.rerun()
@@ -198,13 +201,7 @@ def _render_timeline(published: str, claims, evidence: list) -> None:
 def _render_assessment(claims, evidence: list, user_provided: bool):
     st.markdown("#### Claim Assessment")
     verdict = ve.evaluate_claims(claims, evidence, user_provided)
-    colour = _COLOURS.get(verdict.assessment, "#8b949e")
-    st.markdown(
-        f'<div class="verdict-box" style="border-left-color:{colour}">'
-        f'<div class="verdict-label">ASSESSMENT</div>'
-        f'<div class="verdict-value" style="color:{colour}">{verdict.assessment}</div></div>',
-        unsafe_allow_html=True)
-    st.markdown(f"**Evidence strength:** {verdict.strength}")
+    ui_theme.render_verdict_card(verdict.assessment, verdict.strength)
     st.markdown("**Reason**")
     st.write(verdict.reason)
     if verdict.findings:

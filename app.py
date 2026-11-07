@@ -1,9 +1,8 @@
 """POSANTRA | VERIQ - Streamlit application.
 
-Step 12 state: image investigation (validation, metadata, OCR, forensic
-indicators, fingerprints, assessment, claims in image text), post URL
-retrieval with manual fallback, claim analysis, evidence search and claim
-assessment, investigation reports and opt-in saved investigation records.
+Step 13 state: the full Phase 1 workflow (image investigation, post URL
+investigation, claim analysis, evidence, assessments, reports and opt-in saved
+records) with a unified visual theme in modules/ui_theme.py.
 """
 from __future__ import annotations
 
@@ -24,6 +23,7 @@ from modules import (
     security,
     ui_claims,
     ui_report,
+    ui_theme,
     url_validator,
     verdict_engine,
 )
@@ -33,109 +33,7 @@ st.set_page_config(
     page_icon="🛡️",
     layout="wide",
 )
-
-# ------------------------------------------------------------------ Styling
-CSS = """
-<style>
-    .block-container { padding-top: 4.5rem; max-width: 1200px; }
-    #MainMenu, footer { visibility: hidden; }
-    [data-testid="stToolbar"], [data-testid="stDeployButton"] { display: none; }
-    header[data-testid="stHeader"] { background: transparent; }
-
-    .veriq-header {
-        border-bottom: 1px solid #262c34;
-        padding-bottom: 1rem;
-        margin-bottom: 1.5rem;
-    }
-    .veriq-title {
-        font-size: 2rem; font-weight: 700; letter-spacing: 0.06em;
-        color: #f2f4f7; margin: 0; line-height: 1.3;
-    }
-    .veriq-title .sep { color: #2ea36b; padding: 0 0.35rem; }
-    .veriq-category {
-        color: #8b949e; font-size: 0.95rem; margin: 0.2rem 0 0 0;
-    }
-    .veriq-tagline {
-        color: #2ea36b; font-weight: 600; letter-spacing: 0.08em;
-        font-size: 0.9rem; margin-top: 0.4rem;
-    }
-
-    .veriq-panel {
-        background: #14181d; border: 1px solid #262c34;
-        border-radius: 6px; padding: 1rem 1.2rem; margin-bottom: 1rem;
-    }
-    .veriq-panel h4 {
-        margin: 0 0 0.5rem 0; font-size: 0.8rem; font-weight: 600;
-        letter-spacing: 0.1em; text-transform: uppercase; color: #8b949e;
-    }
-    .status-ok  { color: #2ea36b; font-weight: 600; }
-    .status-bad { color: #e5534b; font-weight: 600; }
-    .muted { color: #8b949e; font-size: 0.85rem; }
-
-    .verdict-box {
-        background: #14181d; border: 1px solid #262c34; border-left: 4px solid #8b949e;
-        border-radius: 6px; padding: 1rem 1.2rem; margin-bottom: 0.8rem;
-    }
-    .verdict-label {
-        font-size: 0.75rem; letter-spacing: 0.12em; color: #8b949e; font-weight: 600;
-    }
-    .verdict-value { font-size: 1.6rem; font-weight: 700; letter-spacing: 0.04em; }
-</style>
-"""
-st.markdown(CSS, unsafe_allow_html=True)
-
-VERDICT_COLOURS = {
-    verdict_engine.AUTHENTIC: "#2ea36b",
-    verdict_engine.MANIPULATED: "#e5534b",
-    verdict_engine.CONTRADICTED: "#e5534b",
-    verdict_engine.MISLEADING_CONTEXT: "#d29922",
-    verdict_engine.UNVERIFIED: "#d29922",
-    verdict_engine.INSUFFICIENT_EVIDENCE: "#8b949e",
-}
-
-
-# ------------------------------------------------------------------- Header
-def render_header() -> None:
-    st.markdown(
-        f"""
-        <div class="veriq-header">
-            <p class="veriq-title">POSANTRA<span class="sep">|</span>VERIQ</p>
-            <p class="veriq-category">{config.PRODUCT_CATEGORY}</p>
-            <p class="veriq-tagline">{config.PRODUCT_TAGLINE.upper()}</p>
-        </div>
-        """,
-        unsafe_allow_html=True,
-    )
-
-
-# ----------------------------------------------------------- Tool status UI
-@st.cache_data(show_spinner=False)
-def cached_tool_status() -> dict:
-    return config.tool_status()
-
-
-def render_tool_status() -> None:
-    status = cached_tool_status()
-    rows = []
-    labels = {"tesseract": "Tesseract OCR", "exiftool": "ExifTool"}
-    for key, label in labels.items():
-        info = status[key]
-        if info["available"]:
-            badge = '<span class="status-ok">● Available</span>'
-            detail = info["version"] or ""
-        else:
-            badge = '<span class="status-bad">● Not available</span>'
-            detail = "Related analysis will be reported as not available."
-        rows.append(
-            f"<div>{badge} &nbsp; <b>{label}</b> "
-            f"<span class='muted'>{detail}</span></div>"
-        )
-    st.markdown(
-        '<div class="veriq-panel"><h4>Analysis components</h4>'
-        + "".join(rows)
-        + "</div>",
-        unsafe_allow_html=True,
-    )
+ui_theme.apply_theme()
 
 
 # ------------------------------------------------------------ Mode: image
@@ -213,17 +111,9 @@ def render_image_mode() -> None:
 # ------------------------------------------------------------------ Summary
 def render_summary(verdict) -> None:
     st.markdown("#### Investigation Summary")
-    colour = VERDICT_COLOURS.get(verdict.assessment, "#8b949e")
-    # Only the fixed assessment label is placed in HTML. Everything derived from
-    # the uploaded file is rendered as plain text below.
-    st.markdown(
-        f'<div class="verdict-box" style="border-left-color:{colour}">'
-        f'<div class="verdict-label">ASSESSMENT</div>'
-        f'<div class="verdict-value" style="color:{colour}">{verdict.assessment}</div>'
-        f"</div>",
-        unsafe_allow_html=True,
-    )
-    st.markdown(f"**Evidence strength:** {verdict.strength}")
+    # Only fixed labels are placed in HTML. Everything derived from the uploaded
+    # file is rendered as plain text below.
+    ui_theme.render_verdict_card(verdict.assessment, verdict.strength)
     st.markdown("**Reason**")
     st.write(verdict.reason)
 
@@ -737,8 +627,8 @@ def render_disclaimer() -> None:
 
 # --------------------------------------------------------------------- Main
 def main() -> None:
-    render_header()
-    render_tool_status()
+    ui_theme.render_header()
+    ui_theme.render_tool_status()
 
     mode = st.radio(
         "Investigation mode",

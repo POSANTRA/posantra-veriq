@@ -372,8 +372,9 @@ def _build_result(tags: list[Tag], source: str) -> MetadataResult:
     if result.content_credentials:
         result.notes.append(
             "This file contains Content Credentials (C2PA) metadata. VERIQ reads what "
-            "the manifest claims but has not validated its signature. The absence of "
-            "such metadata in other files is not evidence of anything."
+            "the manifest claims but has not validated its signature. Many genuine and "
+            "AI-generated files carry no such metadata, so its absence in other files "
+            "means nothing."
         )
 
     rows = sorted(
