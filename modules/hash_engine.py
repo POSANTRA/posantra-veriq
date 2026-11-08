@@ -1,4 +1,4 @@
-"""POSANTRA | VERIQ - image fingerprinting (Step 8).
+"""POSANTRA | VERIQ - image fingerprinting.
 
 SHA-256 identifies a byte-identical file. Perceptual hashes (aHash, pHash,
 dHash) stay similar when an image is resized or recompressed. Similarity is
@@ -50,6 +50,7 @@ class Match:
     phash_distance: int
     dhash_distance: int
     level: str
+    origin: str = ""           # what the earlier file said about itself: ai / camera / credentials / ""
 
 
 def hamming_distance(a: str, b: str) -> Optional[int]:
@@ -139,6 +140,7 @@ def compare_to_records(hashes: HashResult, records: list[dict]) -> list[Match]:
             first_seen=rec.get("first_seen") or "unknown",
             times_seen=int(rec.get("times_seen") or 1),
             ahash_distance=a, phash_distance=p, dhash_distance=d, level=level,
+            origin=str(rec.get("origin") or ""),
         ))
     matches.sort(key=lambda m: (max(m.phash_distance, m.dhash_distance), m.phash_distance))
     return matches[:MAX_MATCHES]

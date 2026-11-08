@@ -11,7 +11,8 @@ CREATE TABLE IF NOT EXISTS fingerprints (
     height      INTEGER,
     first_seen  TEXT NOT NULL,
     last_seen   TEXT NOT NULL,
-    times_seen  INTEGER NOT NULL DEFAULT 1
+    times_seen  INTEGER NOT NULL DEFAULT 1,
+    origin      TEXT NOT NULL DEFAULT ''
 );
 
 -- Saved only when the user clicks "Save investigation record locally".

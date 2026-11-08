@@ -114,7 +114,9 @@ def tool_status() -> dict[str, dict]:
             "version": version,
         }
     return status
-
+# ------------------------------------------------ experimental AI-pixel check
+AI_MODEL_ID = "umm-maybe/AI-image-detector"   # Hugging Face model; change if it disappoints
+AI_MODEL_IDS = ["umm-maybe/AI-image-detector", "Organika/sdxl-detector"]   # ensemble; verify names on huggingface.co
 
 if __name__ == "__main__":
     print(PRODUCT_FULL_NAME, "-", PRODUCT_TAGLINE)

@@ -1,8 +1,9 @@
 """POSANTRA | VERIQ - local SQLite storage.
 
-Stores image fingerprints (hashes, sanitised file name, dimensions, timestamps)
-and, only on explicit user action, investigation records. Uploaded image
-content is never stored. All queries are parameterised.
+Stores image fingerprints (hashes, sanitised file name, dimensions, timestamps,
+and a short note of what the file said about itself) and, only on explicit user
+action, investigation records. Uploaded image content is never stored. All
+queries are parameterised.
 """
 from __future__ import annotations
 
@@ -18,6 +19,7 @@ import config
 _SCHEMA_PATH = Path(__file__).with_name("schema.sql")
 MAX_RECORDS_COMPARED = 5000
 MAX_RECORD_BYTES = 2_000_000
+ORIGINS = ("ai", "camera", "credentials")
 
 
 def _now() -> str:
@@ -29,6 +31,11 @@ def _connect() -> sqlite3.Connection:
     conn = sqlite3.connect(config.DB_PATH, timeout=5)
     conn.row_factory = sqlite3.Row
     conn.executescript(_SCHEMA_PATH.read_text(encoding="utf-8"))
+    # Upgrade databases created before the 'origin' column existed.
+    columns = {row["name"] for row in conn.execute("PRAGMA table_info(fingerprints)")}
+    if "origin" not in columns:
+        conn.execute("ALTER TABLE fingerprints ADD COLUMN origin TEXT NOT NULL DEFAULT ''")
+        conn.commit()
     return conn
 
 
@@ -42,7 +49,8 @@ def get_by_sha(sha256: str) -> Optional[dict]:
 
 
 def save_fingerprint(sha256: str, ahash: str, phash: str, dhash: str,
-                     filename: str, width: int, height: int) -> None:
+                     filename: str, width: int, height: int, origin: str = "") -> None:
+    origin = origin if origin in ORIGINS else ""
     now = _now()
     with closing(_connect()) as conn:
         with conn:
@@ -50,13 +58,15 @@ def save_fingerprint(sha256: str, ahash: str, phash: str, dhash: str,
                 """
                 INSERT INTO fingerprints
                     (sha256, ahash, phash, dhash, filename, width, height,
-                     first_seen, last_seen, times_seen)
-                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 1)
+                     first_seen, last_seen, times_seen, origin)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 1, ?)
                 ON CONFLICT(sha256) DO UPDATE SET
                     last_seen = excluded.last_seen,
-                    times_seen = times_seen + 1
+                    times_seen = times_seen + 1,
+                    origin = CASE WHEN excluded.origin <> '' THEN excluded.origin
+                                  ELSE fingerprints.origin END
                 """,
-                (sha256, ahash, phash, dhash, filename, width, height, now, now),
+                (sha256, ahash, phash, dhash, filename, width, height, now, now, origin),
             )
 
 
