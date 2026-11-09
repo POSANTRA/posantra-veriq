@@ -8,6 +8,7 @@ from __future__ import annotations
 
 import base64
 import html
+import os
 import sqlite3
 import threading
 from concurrent.futures import ThreadPoolExecutor
@@ -47,6 +48,20 @@ from modules import (
 GOLD = "#e3b04b"
 BLUE = "#58a6ff"
 MAX_CACHED = 6
+BIG_IMAGE_PIXELS = 6_000_000
+
+
+def is_online() -> bool:
+    """True on a shared host (set VERIQ_ONLINE=1/0 to override auto-detection)."""
+    flag = os.environ.get("VERIQ_ONLINE")
+    if flag is not None:
+        return flag.strip().lower() in ("1", "true", "yes")
+    return bool(os.environ.get("STREAMLIT_SHARING_MODE") or os.environ.get("STREAMLIT_RUNTIME_ENV")
+                or os.path.exists("/mount/src") or os.path.exists("/home/adminuser"))
+
+
+ONLINE = is_online()
+WHERE = "the host's server" if ONLINE else "this computer"
 
 AWARENESS_TIPS = [
     ("Screenshots", "remove an image's AI label. A missing label proves nothing."),
@@ -157,6 +172,11 @@ BRAND_CSS = """
     @keyframes stamp { from { transform: scale(2.2) rotate(-14deg); opacity: 0; } to { transform: none; opacity: 1; } }
     @keyframes rotw { 0%, 20% { transform: translateY(0); } 25%, 45% { transform: translateY(-1.3em); }
         50%, 70% { transform: translateY(-2.6em); } 75%, 95% { transform: translateY(-3.9em); } 100% { transform: translateY(0); } }
+    @keyframes typing { from { width: 0; } to { width: 100%; } }
+    @keyframes caret { 50% { border-color: transparent; } }
+    @keyframes sparkle { 0% { transform: translate(0,0) scale(.4); opacity: 1; }
+        100% { transform: translate(var(--dx), var(--dy)) scale(1); opacity: 0; } }
+    @keyframes stageOn { from { background: #10151f; } to { background: rgba(227,176,75,.2); } }
 
     .bq-header { position: relative; display: flex; align-items: center; gap: 1.2rem;
         padding-bottom: 1.1rem; margin-bottom: 1rem; animation: fadeUp .7s ease both; }
@@ -225,6 +245,8 @@ BRAND_CSS = """
         background-size: 250% 100%; -webkit-background-clip: text; background-clip: text;
         -webkit-text-fill-color: transparent; color: transparent; animation: sweep 6s linear infinite; }
     .lp-p { color: #9aa4b2; max-width: 520px; line-height: 1.55; }
+    .typed { display: inline-block; overflow: hidden; white-space: nowrap; max-width: 100%; vertical-align: bottom;
+        border-right: 3px solid var(--gold); animation: typing 2.2s steps(34, end) both, caret .8s step-end 6; }
     .rotline { margin-top: .9rem; color: #c9d1d9; font-weight: 600; display: flex; gap: .5rem; align-items: baseline; }
     .rot { display: inline-block; height: 1.3em; overflow: hidden; vertical-align: bottom; }
     .rot-in { display: flex; flex-direction: column; animation: rotw 12s ease-in-out infinite; }
@@ -249,9 +271,11 @@ BRAND_CSS = """
         animation: fadeUp .6s ease both; transition: all .25s; position: relative; overflow: hidden; }
     .fcard::after { content: ""; position: absolute; top: 0; left: -80%; width: 50%; height: 100%;
         background: linear-gradient(100deg, transparent, rgba(227,176,75,.10), transparent); transition: left .6s; }
-    .fcard:hover { border-color: var(--gold); transform: translateY(-4px); box-shadow: 0 8px 26px rgba(0,0,0,.4); }
+    .fcard:hover { border-color: var(--gold); transform: translateY(-4px) rotate(-.4deg); box-shadow: 0 8px 26px rgba(0,0,0,.4); }
     .fcard:hover::after { left: 130%; }
-    .fcard .ic { font-size: 1.5rem; } .fcard .t { font-weight: 700; color: #f4f6fa; margin-top: .3rem; }
+    .fcard .ic { font-size: 1.5rem; display: inline-block; transition: transform .3s; }
+    .fcard:hover .ic { transform: scale(1.25) rotate(-8deg); }
+    .fcard .t { font-weight: 700; color: #f4f6fa; margin-top: .3rem; }
     .fcard .d { color: #8b949e; font-size: .82rem; margin-top: .15rem; line-height: 1.4; }
 
     .how { display: flex; align-items: stretch; margin: 1.4rem 0 .4rem 0; flex-wrap: wrap; }
@@ -271,7 +295,7 @@ BRAND_CSS = """
 
     .pipe { display: flex; align-items: center; gap: .4rem; margin: .4rem 0 1rem 0; flex-wrap: wrap; }
     .pipe-n { padding: 5px 12px; border: 1px solid #262c34; border-radius: 999px; background: #10151f;
-        color: #c9d1d9; font-size: .78rem; animation: fadeUp .5s ease both; }
+        color: #c9d1d9; font-size: .78rem; animation: fadeUp .5s ease both, stageOn .5s ease both; }
     .pipe-a { height: 2px; width: 26px; border-radius: 2px;
         background: linear-gradient(90deg, #262c34, var(--gold), #262c34); background-size: 200% 100%; animation: flow 2s linear infinite; }
 
@@ -347,8 +371,8 @@ BRAND_CSS = """
     .sr-note { color: #8b949e; font-size: .8rem; margin-top: .8rem; }
 
     .lamps { display: grid; grid-template-columns: repeat(auto-fit, minmax(140px, 1fr)); gap: .7rem; margin: .5rem 0 1rem 0; }
-    .lamp { text-align: center; padding: .8rem .5rem; border: 1px solid #262c34; border-radius: 12px; background: #0d121c;
-        animation: fadeUp .6s ease both; transition: all .25s; }
+    .lamp { position: relative; text-align: center; padding: .8rem .5rem; border: 1px solid #262c34; border-radius: 12px;
+        background: #0d121c; animation: fadeUp .6s ease both; transition: all .25s; }
     .lamp:hover { transform: translateY(-3px); }
     .lamp .bulb { width: 46px; height: 46px; margin: 0 auto .45rem auto; border-radius: 50%; display: flex;
         align-items: center; justify-content: center; font-size: 1.3rem; border: 2px solid var(--lc);
@@ -359,6 +383,9 @@ BRAND_CSS = """
     .lamp .ln { font-weight: 700; font-size: .85rem; color: #f4f6fa; }
     .lamp .lt { font-size: .74rem; color: #8b949e; margin-top: .15rem; line-height: 1.3; }
     .lamp.on, .lamp.alert, .lamp.hint { border-color: var(--lc); }
+    .lamp.on::before, .lamp.alert::before, .lamp.hint::before { content: ""; position: absolute; top: 30px; left: 50%;
+        width: 6px; height: 6px; border-radius: 50%; background: var(--lc); pointer-events: none;
+        --dx: -34px; --dy: -22px; animation: sparkle .9s ease-out .35s both; box-shadow: 30px 6px 0 var(--lc), 62px -8px 0 var(--lc); }
 
     @media (prefers-reduced-motion: reduce) { *, *::before, *::after { animation: none !important; transition: none !important; } }
     @media (max-width: 700px) {
@@ -372,7 +399,7 @@ BRAND_CSS = """
 st.markdown(BRAND_CSS, unsafe_allow_html=True)
 
 
-def background_html(count: int = 18) -> str:
+def background_html(count: int = 14) -> str:
     spans = [f'<span style="left:{(i * 37) % 100}%;width:{2 + (i * 5) % 4}px;height:{2 + (i * 5) % 4}px;'
              f'animation-duration:{14 + (i * 7) % 16}s;animation-delay:{-((i * 3) % 20)}s"></span>'
              for i in range(count)]
@@ -431,9 +458,9 @@ def render_landing(kind: str) -> None:
                  ("📷", "Camera clues", "Finds camera and editing-app details."),
                  ("💬", "File kind", "Spots WhatsApp copies and screenshots."),
                  ("🧬", "Copy spotting", "Recognises copies of images you checked."),
-                 ("🧪", "Pixel hint", "Optional weak AI check, models must agree.")]
+                 ("🔤", "Text reading", "Reads words inside the picture.")]
         steps = [("Drop", "Upload a JPG, PNG or WebP picture."),
-                 ("Scan", "VERIQ checks labels, camera info, file kind, text and look-alikes on this computer."),
+                 ("Scan", "VERIQ checks labels, camera info, file kind, text and look-alikes."),
                  ("Understand", "You get a plain answer, clue lamps and next steps.")]
     else:
         kicker, headline = "POST CHECK", "Is this post <em>worth believing</em>?"
@@ -455,18 +482,17 @@ def render_landing(kind: str) -> None:
         f'<div class="how-step" style="animation-delay:{i * 0.15:.2f}s"><span class="how-n">{i + 1}</span>'
         f'<div class="how-t">{html.escape(t)}</div><div class="how-d">{html.escape(d)}</div></div>'
         for i, (t, d) in enumerate(steps))
-    try:
-        remembered = local_db.count_fingerprints()
-    except sqlite3.Error:
-        remembered = None
     stats = ""
-    if remembered is not None:
-        stats = (f'<div class="stats"><div class="stat"><b>{remembered}</b>'
-                 "<span>IMAGES REMEMBERED ON THIS COMPUTER</span></div>"
-                 '<div class="stat"><b>0</b><span>IMAGES SENT ANYWHERE</span></div></div>')
+    if not ONLINE:
+        try:
+            stats = (f'<div class="stats"><div class="stat"><b>{local_db.count_fingerprints()}</b>'
+                     "<span>IMAGES REMEMBERED ON THIS COMPUTER</span></div></div>")
+        except sqlite3.Error:
+            stats = ""
     st.markdown(
         f'<div class="lp"><div class="lp-text"><div class="lp-kicker">◈ {kicker}</div>'
-        f'<div class="lp-h">{headline}</div><div class="lp-p">{html.escape(text)}</div>{rot}{stats}</div>'
+        f'<div class="lp-h"><span class="typed">{headline}</span></div>'
+        f'<div class="lp-p">{html.escape(text)}</div>{rot}{stats}</div>'
         '<div class="radar"><div class="sweep"></div><div class="dot d1"></div>'
         '<div class="dot d2"></div><div class="dot d3"></div><div class="core"></div></div></div>'
         f'<div class="fgrid">{items}</div><div class="how">{how}</div>', unsafe_allow_html=True)
@@ -552,7 +578,7 @@ def render_simple(result, preview: Optional[bytes] = None, heading: str = "Resul
         with st.expander("Copy a short summary to share"):
             st.code(simple_result.summary_text(result), language=None)
     st.markdown('<div class="sr-note">VERIQ gives clues, not final proof. It never says a picture is '
-                "'real' or a post is 'true'. Image checks run on this computer.</div>",
+                f"'real' or a post is 'true'. Image checks run on {WHERE}.</div>",
                 unsafe_allow_html=True)
 
 
@@ -584,8 +610,13 @@ def render_place(meta) -> None:
 
 
 # ----------------------------------------------- cached image analysis
-def get_local_comparison(hashes, validation, info, remember: bool, origin: str = "") -> dict:
-    """Compare once per image per session BEFORE saving, so reruns never self-match."""
+def get_local_comparison(hashes, validation, info, remember: bool, origin: str = "") -> Optional[dict]:
+    """Compare once per image per session BEFORE saving, so reruns never self-match.
+
+    Online, the shared database is never read or written (visitors must not see each other's images).
+    """
+    if ONLINE:
+        return None
     cache = st.session_state.setdefault("veriq_cmp", {})
     saved = st.session_state.setdefault("veriq_saved", set())
     sha = hashes.sha256
@@ -616,6 +647,21 @@ def _trim(cache: dict) -> None:
         cache.pop(next(iter(cache)))
 
 
+def _small_copy(data: bytes) -> bytes:
+    """Downscale very large images so OCR and hashing stay fast (metadata uses the original)."""
+    try:
+        with Image.open(BytesIO(data)) as img:
+            if img.width * img.height <= BIG_IMAGE_PIXELS:
+                return data
+            rgb = img.convert("RGB")
+        rgb.thumbnail((2400, 2400))
+        out = BytesIO()
+        rgb.save(out, format="PNG")
+        return out.getvalue()
+    except Exception:
+        return data
+
+
 def analyze_image(data: bytes, filename: str, remember: bool, use_ai: bool) -> dict:
     validation = security.validate_upload(filename, data)
     if not validation.ok:
@@ -627,11 +673,14 @@ def analyze_image(data: bytes, filename: str, remember: bool, use_ai: bool) -> d
     sha = validation.sha256
     base_cache = st.session_state.setdefault("veriq_base", {})
     if sha not in base_cache:
+        small = _small_copy(data)
         with ThreadPoolExecutor(max_workers=3) as pool:
             f_meta = pool.submit(metadata_analyzer.analyze_metadata, data, validation.extension)
-            f_ocr = pool.submit(ocr_engine.extract_text, data)
-            f_hash = pool.submit(hash_engine.compute_hashes, data)
+            f_ocr = pool.submit(ocr_engine.extract_text, small)
+            f_hash = pool.submit(hash_engine.compute_hashes, small)
             meta, ocr, hashes = f_meta.result(), f_ocr.result(), f_hash.result()
+        if hashes.sha256 != sha:       # keep the SHA of the real file, not of the downscaled copy
+            hashes.sha256 = sha
         base_cache[sha] = {"meta": meta, "ocr": ocr, "hashes": hashes}
         _trim(base_cache)
     base = base_cache[sha]
@@ -693,7 +742,7 @@ def render_media_information(validation, info) -> None:
     st.table([{"Field": k, "Value": v} for k, v in rows])
     st.markdown("**SHA-256**")
     st.code(validation.sha256, language=None)
-    st.caption("Validation passed. This image was decoded locally and is not stored.")
+    st.caption("Validation passed. This image was decoded and is not stored.")
 
 
 def render_metadata(meta) -> None:
@@ -784,7 +833,7 @@ def render_forensics(result) -> None:
 
 def render_hashes(hashes, comparison) -> None:
     st.markdown("#### Image Fingerprints and Local Comparison")
-    if hashes.status != config.STATUS_COMPLETED or comparison is None:
+    if hashes.status != config.STATUS_COMPLETED:
         st.error(f"Fingerprinting: {hashes.status}. {hashes.error or ''}")
         return
     st.caption(f"Status: {hashes.status}")
@@ -795,6 +844,10 @@ def render_hashes(hashes, comparison) -> None:
     for note in hashes.notes:
         st.caption(note)
     st.markdown("**Local comparison**")
+    if comparison is None:
+        st.caption("Comparison with earlier images is turned off on the hosted version, so visitors "
+                   "never see each other's images. Run VERIQ on your own computer to use it.")
+        return
     if not comparison["ok"]:
         st.warning("The local fingerprint history could not be read, so no comparison was made.")
         return
@@ -889,7 +942,8 @@ def render_image_mode(remember: bool, use_ai: bool) -> None:
             st.markdown(f"- {message}")
         return
 
-    st.markdown(pipeline_html(["Upload", "Labels", "Camera", "File kind", "Text", "Look-alikes"] +
+    st.markdown(pipeline_html(["Upload", "Labels", "Camera", "File kind", "Text"] +
+                              (["Look-alikes"] if bundle["comparison"] is not None else []) +
                               (["Pixels"] if bundle["ai_hint"] is not None else []) + ["Answer"]),
                 unsafe_allow_html=True)
     show_image_result(bundle)
@@ -918,7 +972,7 @@ def render_url_mode(remember: bool, use_ai: bool) -> None:
     with st.form("veriq_url_form"):
         raw = st.text_input("Public post URL", placeholder="https://...", max_chars=url_validator.MAX_URL_LENGTH)
         submitted = st.form_submit_button("Check this post")
-    st.caption("VERIQ requests the address from this machine, so the site (and, for X, YouTube and TikTok, "
+    st.caption(f"VERIQ requests the address from {WHERE}, so the site (and, for X, YouTube and TikTok, "
                "that platform's public oEmbed service) can see the request. It never logs in, imitates a "
                "browser session or bypasses access restrictions.")
     if submitted:
@@ -1097,30 +1151,35 @@ def clear_local_history() -> None:
 
 
 def render_privacy_panel() -> None:
+    fingerprint_line = (
+        "not stored or compared on the hosted version." if ONLINE else
+        'only if "Remember" is ticked: hashes, the sanitised file name, dimensions, timestamps and a '
+        "short note of what the file said about itself, in a local SQLite file. Never the image."
+    )
     with st.expander("Privacy and data handling"):
+        if ONLINE:
+            st.warning("This is the hosted version. Images you upload are processed on the host's "
+                       "server (not on your device). Avoid uploading private or sensitive pictures.")
         st.markdown(f"""
-- **What is processed:** images you upload, analysed on this machine.
-- **Where:** locally. Uploaded images are not sent to external services.
-- **AI-pixel check (optional):** runs models on this computer. The first run downloads them
-  from Hugging Face; your image is not uploaded.
-- **Post URL mode:** the URL you submit is requested from this machine, and so is the post's public
+- **What is processed:** images you upload, analysed on {WHERE}.
+- **Stored images:** never. Files are analysed in memory and temporary files are deleted straight away.
+- **Post URL mode:** the URL you submit is requested from {WHERE}, and so is the post's public
   preview picture if the site offers one. The site, and for X, YouTube and TikTok that platform's public
-  oEmbed service, can see those requests. Text you paste manually stays on this machine.
+  oEmbed service, can see those requests. Text you paste manually is processed on {WHERE}.
 - **Evidence search:** only when you click Search, the query text you can see is sent to Wikipedia and
   the GDELT news index. **Region lookup:** only when you click it, rounded coordinates go to OpenStreetMap.
-- **Fingerprints:** only if "Remember" is ticked: hashes, the sanitised file name, dimensions,
-  timestamps and a short note of what the file said about itself, in a local SQLite file. Never the image.
+- **Fingerprints:** {fingerprint_line}
 - **Reports and saved records:** only when you ask. Reports never contain the image.
 - **Session data:** analysis results, post content, claims and evidence live in this browser session only.
-- **Temporary files:** removed after each analysis.
 - **Limit:** files up to {config.MAX_UPLOAD_MB} MB.
 """)
-        try:
-            st.caption(f"Fingerprints currently stored locally: {local_db.count_fingerprints()}")
-        except sqlite3.Error:
-            st.caption("The local history could not be read.")
-        if st.button("Clear local fingerprint history"):
-            clear_local_history()
+        if not ONLINE:
+            try:
+                st.caption(f"Fingerprints currently stored locally: {local_db.count_fingerprints()}")
+            except sqlite3.Error:
+                st.caption("The local history could not be read.")
+            if st.button("Clear local fingerprint history"):
+                clear_local_history()
 
 
 def render_disclaimer() -> None:
@@ -1137,17 +1196,18 @@ def main() -> None:
                     horizontal=True, label_visibility="collapsed")
 
     c1, c2 = st.columns(2)
-    remember = c1.checkbox("Remember fingerprints on this computer (spots copies and screenshots later)",
-                           value=True, help="Stores only a short fingerprint and a note of what the file said "
-                           "about itself, never the image.")
-    use_ai = c2.checkbox("Also run the experimental AI-pixel check (2 models must agree)", value=False,
-                         help="Weak and often wrong on screenshots. Runs locally; first use downloads models.")
-    if use_ai and not ai_indicator.available():
-        c2.warning("Needs: pip install torch transformers")
-        use_ai = False
-    if use_ai and not st.session_state.get("veriq_warm"):
-        st.session_state["veriq_warm"] = True
-        threading.Thread(target=ai_indicator.warm, daemon=True).start()
+    remember = False
+    if not ONLINE:
+        remember = c1.checkbox("Remember fingerprints on this computer (spots copies and screenshots later)",
+                               value=True, help="Stores only a short fingerprint and a note of what the file "
+                               "said about itself, never the image.")
+    use_ai = False
+    if ai_indicator.available():
+        use_ai = c2.checkbox("Also run the experimental AI-pixel check (models must agree)", value=False,
+                             help="Weak and often wrong on screenshots. Runs locally; first use downloads models.")
+        if use_ai and not st.session_state.get("veriq_warm"):
+            st.session_state["veriq_warm"] = True
+            threading.Thread(target=ai_indicator.warm, daemon=True).start()
     st.divider()
 
     if mode == "IMAGE INVESTIGATION":
@@ -1157,7 +1217,8 @@ def main() -> None:
 
     st.divider()
     render_privacy_panel()
-    ui_report.render_saved_records()
+    if not ONLINE:
+        ui_report.render_saved_records()
     render_disclaimer()
 
 
