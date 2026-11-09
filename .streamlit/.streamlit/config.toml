@@ -1,13 +1,22 @@
 [theme]
 base = "dark"
-primaryColor = "#2ea36b"
-backgroundColor = "#0b0d10"
-secondaryBackgroundColor = "#14181d"
+primaryColor = "#e3b04b"
+backgroundColor = "#060a13"
+secondaryBackgroundColor = "#10151f"
 textColor = "#d8dde3"
 font = "sans serif"
 
 [server]
 maxUploadSize = 10
+enableXsrfProtection = true
+enableCORS = true
+fileWatcherType = "none"
+
+[client]
+toolbarMode = "viewer"
 
 [browser]
 gatherUsageStats = false
+
+[runner]
+fastReruns = true

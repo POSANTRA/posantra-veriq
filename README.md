@@ -1,3 +1,8 @@
+---
+title: POSANTRA VERIQ
+sdk: streamlit
+app_file: app.py
+---
 # POSANTRA | VERIQ
 
 **Detect. Investigate. Verify.**

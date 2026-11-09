@@ -1,15 +1,14 @@
 """POSANTRA | VERIQ - experimental AI-pixel indicator (ensemble).
 
-Runs one or more local open-source image classifiers. LOW RELIABILITY,
-especially on screenshots and messaging-app copies. 'Leans AI' needs ALL
-models to agree; any disagreement is 'unsure'. A hint only: it never feeds a
-verdict, never says 'real', and shows no percentage.
+LOW RELIABILITY, especially on screenshots and messaging-app copies. 'Leans AI'
+needs EVERY model that ran to agree; any disagreement is 'unsure'. A hint only:
+it never feeds a verdict, never says 'real', and shows no percentage.
 """
 from __future__ import annotations
 
 import importlib.util
 import threading
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from io import BytesIO
 from typing import Optional
 
@@ -18,10 +17,11 @@ import config
 LEANS_AI = "leans_ai"
 NO_SIGNS = "no_signs"
 UNSURE = "unsure"
-HIGH, LOW = 0.90, 0.10
+HIGH, LOW = 0.80, 0.20
 AI_WORDS = ("artificial", "ai", "fake", "synthetic", "generated")
 REAL_WORDS = ("human", "real", "natural", "authentic")
 MAX_SIDE = 448
+LEVEL_TEXT = {LEANS_AI: "leaned AI", NO_SIGNS: "no clear signs", UNSURE: "unsure"}
 
 _lock = threading.Lock()
 _loaded: dict = {}
@@ -35,6 +35,8 @@ class AIIndicator:
     error: Optional[str] = None
     votes_ai: int = 0
     votes_total: int = 0
+    details: list = field(default_factory=list)   # [(model name, level)]
+    notes: list = field(default_factory=list)     # models that could not run
 
 
 def available() -> bool:
@@ -73,7 +75,6 @@ def level_for(score: Optional[float]) -> str:
 
 
 def combine(levels: list) -> str:
-    """Say 'leans AI' or 'no signs' only when every model agrees."""
     if levels and all(l == LEANS_AI for l in levels):
         return LEANS_AI
     if levels and all(l == NO_SIGNS for l in levels):
@@ -114,14 +115,17 @@ def analyze(data: bytes, model_id: Optional[str] = None) -> AIIndicator:
     except Exception as exc:
         return AIIndicator(config.STATUS_FAILED, model=label,
                            error=f"The image could not be read ({type(exc).__name__}).")
-    levels, used, errors = [], [], []
+    levels, details, notes = [], [], []
     for mid in ids:
         try:
-            levels.append(level_for(ai_probability(_pipeline(mid)(rgb, top_k=5))))
-            used.append(mid)
+            level = level_for(ai_probability(_pipeline(mid)(rgb, top_k=5)))
+            levels.append(level)
+            details.append((mid.split("/")[-1], level))
         except Exception as exc:
-            errors.append(f"{mid}: {type(exc).__name__}")
+            notes.append(f"{mid.split('/')[-1]} could not run ({type(exc).__name__}).")
     if not levels:
-        return AIIndicator(config.STATUS_FAILED, model=label, error="; ".join(errors) or "No model ran.")
-    return AIIndicator(config.STATUS_COMPLETED, combine(levels), ", ".join(used), None,
-                       votes_ai=levels.count(LEANS_AI), votes_total=len(levels))
+        return AIIndicator(config.STATUS_FAILED, model=label,
+                           error="; ".join(notes) or "No model ran.", notes=notes)
+    return AIIndicator(config.STATUS_COMPLETED, combine(levels), ", ".join(d[0] for d in details), None,
+                       votes_ai=levels.count(LEANS_AI), votes_total=len(levels),
+                       details=details, notes=notes)

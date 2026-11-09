@@ -26,6 +26,7 @@ from modules import (
     ai_indicator,
     file_kind,
     forensic_analyzer,
+    gate,
     hash_engine,
     image_analyzer,
     image_fetch,
@@ -56,8 +57,9 @@ def is_online() -> bool:
     flag = os.environ.get("VERIQ_ONLINE")
     if flag is not None:
         return flag.strip().lower() in ("1", "true", "yes")
-    return bool(os.environ.get("STREAMLIT_SHARING_MODE") or os.environ.get("STREAMLIT_RUNTIME_ENV")
-                or os.path.exists("/mount/src") or os.path.exists("/home/adminuser"))
+        return bool(os.environ.get("STREAMLIT_SHARING_MODE") or os.environ.get("STREAMLIT_RUNTIME_ENV")
+                or os.environ.get("SPACE_ID") or os.path.exists("/mount/src")
+                or os.path.exists("/home/adminuser"))
 
 
 ONLINE = is_online()
@@ -122,6 +124,7 @@ def preview_uri(data: bytes) -> Optional[str]:
 
 st.set_page_config(page_title=config.PRODUCT_FULL_NAME, page_icon=page_icon(), layout="wide")
 ui_theme.apply_theme()
+gate.require_access()
 
 BRAND_CSS = """
 <style>
@@ -397,6 +400,30 @@ BRAND_CSS = """
 </style>
 """.replace("__GOLD__", GOLD).replace("__BLUE__", BLUE)
 st.markdown(BRAND_CSS, unsafe_allow_html=True)
+EXTRA_CSS = """
+<style>
+    @keyframes topbar { 0% { transform: translateX(-100%); } 100% { transform: translateX(100%); } }
+    @keyframes borderflow { to { background-position: 300% 0; } }
+    @keyframes ripplebtn { from { box-shadow: 0 0 0 0 rgba(227,176,75,.5); } to { box-shadow: 0 0 0 14px rgba(227,176,75,0); } }
+    @keyframes curtain { from { clip-path: inset(0 100% 0 0); } to { clip-path: inset(0 0 0 0); } }
+    @keyframes bob { 0%, 100% { transform: translateY(0); } 50% { transform: translateY(-6px); } }
+    .stApp::selection { background: rgba(227,176,75,.35); }
+    [data-testid="stStatusWidget"] { display: none; }
+    .stApp > header::before { content: ""; position: fixed; top: 0; left: 0; right: 0; height: 3px; z-index: 99999;
+        background: linear-gradient(90deg, transparent, #e3b04b, #2ea36b, transparent); animation: topbar 2.4s ease-in-out infinite; }
+    .stButton > button:active, [data-testid="stFormSubmitButton"] > button:active { animation: ripplebtn .5s ease-out; }
+    [data-testid="stFileUploaderDropzone"]:hover { background: linear-gradient(90deg, rgba(227,176,75,.10), rgba(46,163,107,.10), rgba(227,176,75,.10));
+        background-size: 300% 100%; animation: borderflow 3s linear infinite; }
+    .sr-head, .kind-t { animation: curtain .8s ease both; }
+    .sr-ring, .kind-ic { animation-fill-mode: both; }
+    .fcard .ic { animation: bob 4s ease-in-out infinite; }
+    .fcard:nth-child(2) .ic { animation-delay: .5s; } .fcard:nth-child(3) .ic { animation-delay: 1s; }
+    .fcard:nth-child(4) .ic { animation-delay: 1.5s; } .fcard:nth-child(5) .ic { animation-delay: 2s; }
+    html { scroll-behavior: smooth; }
+    @media (prefers-reduced-motion: reduce) { .stApp > header::before { display: none; } }
+</style>
+"""
+st.markdown(EXTRA_CSS, unsafe_allow_html=True)
 
 
 def background_html(count: int = 14) -> str:
@@ -673,6 +700,8 @@ def analyze_image(data: bytes, filename: str, remember: bool, use_ai: bool) -> d
     sha = validation.sha256
     base_cache = st.session_state.setdefault("veriq_base", {})
     if sha not in base_cache:
+        if not gate.allow_scan():
+            return {"error": ["Too many new checks in a short time. Please wait a few minutes."]}
         small = _small_copy(data)
         with ThreadPoolExecutor(max_workers=3) as pool:
             f_meta = pool.submit(metadata_analyzer.analyze_metadata, data, validation.extension)
@@ -919,6 +948,11 @@ def show_image_result(bundle: dict, heading: str = "Result") -> None:
     if hint is not None and hint.status != config.STATUS_COMPLETED:
         st.caption(f"AI-pixel check: {hint.status}. {hint.error or ''}")
     render_place(bundle["meta"])
+    if hint is not None and hint.status == config.STATUS_COMPLETED:
+        said = "; ".join(f"{name}: {ai_indicator.LEVEL_TEXT.get(level, level)}" for name, level in hint.details)
+        st.caption(f"AI-pixel check, model by model: {said}. Weak hint, often wrong on screenshots and WhatsApp copies.")
+        for note in hint.notes:
+            st.caption(note)
 
 
 # ------------------------------------------------------------ Mode: image
