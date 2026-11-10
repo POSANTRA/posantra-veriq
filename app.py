@@ -32,6 +32,7 @@ from modules import (
     image_fetch,
     metadata_analyzer,
     ocr_engine,
+    pixel_forensics,
     place_clues,
     post_extractor,
     report_generator,
@@ -57,7 +58,7 @@ def is_online() -> bool:
     flag = os.environ.get("VERIQ_ONLINE")
     if flag is not None:
         return flag.strip().lower() in ("1", "true", "yes")
-        return bool(os.environ.get("STREAMLIT_SHARING_MODE") or os.environ.get("STREAMLIT_RUNTIME_ENV")
+    return bool(os.environ.get("STREAMLIT_SHARING_MODE") or os.environ.get("STREAMLIT_RUNTIME_ENV")
                 or os.environ.get("SPACE_ID") or os.path.exists("/mount/src")
                 or os.path.exists("/home/adminuser"))
 
@@ -128,9 +129,32 @@ gate.require_access()
 
 BRAND_CSS = """
 <style>
-    :root { --gold: __GOLD__; --blue: __BLUE__; }
-    .stApp { background: #060a13; }
+    :root { --gold: __GOLD__; --blue: __BLUE__; color-scheme: dark; }
+    html, body, .stApp, [data-testid="stAppViewContainer"], [data-testid="stMain"] { background: #060a13 !important; }
+    .stApp { color-scheme: dark; }
     .block-container { position: relative; z-index: 2; }
+
+    /* ---- readable light text everywhere, even when the phone is in light mode ---- */
+    .stApp [data-testid="stMarkdownContainer"] > p,
+    .stApp [data-testid="stMarkdownContainer"] > ul li,
+    .stApp [data-testid="stMarkdownContainer"] > ol li,
+    .stApp [data-testid="stMarkdownContainer"] > h1, .stApp [data-testid="stMarkdownContainer"] > h2,
+    .stApp [data-testid="stMarkdownContainer"] > h3, .stApp [data-testid="stMarkdownContainer"] > h4,
+    .stApp [data-testid="stMarkdownContainer"] > h5, .stApp [data-testid="stMarkdownContainer"] > h6,
+    .stApp [data-testid="stCaptionContainer"], .stApp [data-testid="stCaptionContainer"] *,
+    .stApp [data-testid="stWidgetLabel"], .stApp [data-testid="stWidgetLabel"] *,
+    .stApp [data-testid="stCheckbox"] *, .stApp [data-testid="stToggle"] *, .stApp [data-testid="stRadio"] label *,
+    .stApp [data-testid="stFileUploaderDropzoneInstructions"] *, .stApp [data-testid="stExpander"] summary *,
+    .stApp [data-testid="stTable"] *, .stApp [data-testid="stMetric"] *, .stApp [data-testid="stHeading"] *,
+    .stApp h1, .stApp h2, .stApp h3, .stApp h4, .stApp h5, .stApp h6 { color: #d8dde3 !important; }
+    .stApp input, .stApp textarea, .stApp [data-baseweb="select"] > div, .stApp [data-baseweb="input"] {
+        background: #10151f !important; color: #f4f6fa !important; border-color: #262c34 !important; }
+    .stApp [data-testid="stFileUploader"] button, .stApp [data-testid="stFileUploaderDropzone"] button {
+        background: #10151f !important; color: #f4f6fa !important; border: 1px solid rgba(227,176,75,.6) !important; }
+    .stApp [data-testid="stExpander"] details { background: rgba(16,21,31,.7) !important; }
+    .stApp [data-testid="stTable"] table { background: #0d121c !important; }
+    .stApp [data-testid="stTable"] th { background: #14181d !important; }
+    .stApp code, .stApp pre { background: #0d121c !important; color: #e6edf3 !important; }
 
     .stApp::before { content: ""; position: fixed; inset: 0; pointer-events: none; z-index: 0;
         background-image: linear-gradient(rgba(227,176,75,0.05) 1px, transparent 1px),
@@ -180,6 +204,17 @@ BRAND_CSS = """
     @keyframes sparkle { 0% { transform: translate(0,0) scale(.4); opacity: 1; }
         100% { transform: translate(var(--dx), var(--dy)) scale(1); opacity: 0; } }
     @keyframes stageOn { from { background: #10151f; } to { background: rgba(227,176,75,.2); } }
+    @keyframes topbar { 0% { transform: translateX(-100%); } 100% { transform: translateX(100%); } }
+    @keyframes borderflow { to { background-position: 300% 0; } }
+    @keyframes ripplebtn { from { box-shadow: 0 0 0 0 rgba(227,176,75,.5); } to { box-shadow: 0 0 0 14px rgba(227,176,75,0); } }
+    @keyframes curtain { from { clip-path: inset(0 100% 0 0); } to { clip-path: inset(0 0 0 0); } }
+    @keyframes bob { 0%, 100% { transform: translateY(0); } 50% { transform: translateY(-6px); } }
+    @keyframes meter { from { width: 0; } }
+
+    .stApp > header::before { content: ""; position: fixed; top: 0; left: 0; right: 0; height: 3px; z-index: 99999;
+        background: linear-gradient(90deg, transparent, #e3b04b, #2ea36b, transparent); animation: topbar 2.4s ease-in-out infinite; }
+    [data-testid="stStatusWidget"] { display: none; }
+    html { scroll-behavior: smooth; }
 
     .bq-header { position: relative; display: flex; align-items: center; gap: 1.2rem;
         padding-bottom: 1.1rem; margin-bottom: 1rem; animation: fadeUp .7s ease both; }
@@ -219,11 +254,12 @@ BRAND_CSS = """
     .stMarkdown h4::before { content: ""; display: inline-block; width: 4px; height: .95em; margin-right: .6rem;
         background: var(--gold); border-radius: 2px; vertical-align: -.1em; }
     .stButton > button, .stDownloadButton > button, [data-testid="stFormSubmitButton"] > button,
-    [data-testid="stLinkButton"] a { border: 1px solid rgba(227,176,75,.5); background: #10151f; color: #f4f6fa;
+    [data-testid="stLinkButton"] a { border: 1px solid rgba(227,176,75,.5); background: #10151f !important; color: #f4f6fa !important;
         border-radius: 8px; transition: all .2s; }
     .stButton > button:hover, .stDownloadButton > button:hover,
     [data-testid="stFormSubmitButton"] > button:hover, [data-testid="stLinkButton"] a:hover {
-        border-color: var(--gold); box-shadow: 0 0 14px rgba(227,176,75,.35); transform: translateY(-1px); color: #fff; }
+        border-color: var(--gold); box-shadow: 0 0 14px rgba(227,176,75,.35); transform: translateY(-1px); color: #fff !important; }
+    .stButton > button:active, [data-testid="stFormSubmitButton"] > button:active { animation: ripplebtn .5s ease-out; }
 
     div[role="radiogroup"] { gap: .6rem; }
     div[role="radiogroup"] label { padding: 8px 20px; border: 1px solid #262c34; border-radius: 999px;
@@ -269,17 +305,19 @@ BRAND_CSS = """
     .radar .d1 { top: 38px; left: 118px; } .radar .d2 { top: 112px; left: 44px; animation-delay: .8s; }
     .radar .d3 { top: 132px; left: 128px; animation-delay: 1.5s; }
     .radar .core { position: absolute; inset: 82px; border-radius: 50%; background: var(--gold); box-shadow: 0 0 18px var(--gold); }
-    .fgrid { display: grid; grid-template-columns: repeat(auto-fit, minmax(190px, 1fr)); gap: .8rem; margin-top: .6rem; }
+    .fgrid { display: grid; grid-template-columns: repeat(auto-fit, minmax(170px, 1fr)); gap: .8rem; margin-top: .6rem; }
     .fcard { padding: 1rem 1.1rem; border: 1px solid #262c34; border-radius: 12px; background: #0d121c;
         animation: fadeUp .6s ease both; transition: all .25s; position: relative; overflow: hidden; }
     .fcard::after { content: ""; position: absolute; top: 0; left: -80%; width: 50%; height: 100%;
         background: linear-gradient(100deg, transparent, rgba(227,176,75,.10), transparent); transition: left .6s; }
     .fcard:hover { border-color: var(--gold); transform: translateY(-4px) rotate(-.4deg); box-shadow: 0 8px 26px rgba(0,0,0,.4); }
     .fcard:hover::after { left: 130%; }
-    .fcard .ic { font-size: 1.5rem; display: inline-block; transition: transform .3s; }
-    .fcard:hover .ic { transform: scale(1.25) rotate(-8deg); }
+    .fcard .ic { font-size: 1.5rem; display: inline-block; animation: bob 4s ease-in-out infinite; }
+    .fcard:nth-child(2) .ic { animation-delay: .5s; } .fcard:nth-child(3) .ic { animation-delay: 1s; }
+    .fcard:nth-child(4) .ic { animation-delay: 1.5s; } .fcard:nth-child(5) .ic { animation-delay: 2s; }
+    .fcard:nth-child(6) .ic { animation-delay: 2.5s; }
     .fcard .t { font-weight: 700; color: #f4f6fa; margin-top: .3rem; }
-    .fcard .d { color: #8b949e; font-size: .82rem; margin-top: .15rem; line-height: 1.4; }
+    .fcard .d { color: #9aa4b2; font-size: .82rem; margin-top: .15rem; line-height: 1.4; }
 
     .how { display: flex; align-items: stretch; margin: 1.4rem 0 .4rem 0; flex-wrap: wrap; }
     .how-step { flex: 1 1 200px; position: relative; padding: 1rem 1.2rem; border: 1px solid #262c34;
@@ -289,12 +327,12 @@ BRAND_CSS = """
         justify-content: center; font-weight: 800; color: #0b101a; background: var(--gold); font-size: .85rem;
         box-shadow: 0 0 12px rgba(227,176,75,.5); }
     .how-t { font-weight: 700; color: #f4f6fa; margin: .5rem 0 .15rem 0; }
-    .how-d { color: #8b949e; font-size: .82rem; line-height: 1.4; }
+    .how-d { color: #9aa4b2; font-size: .82rem; line-height: 1.4; }
     .how-step:not(:last-child)::after { content: "➜"; position: absolute; right: -11px; top: 50%; z-index: 3;
         transform: translateY(-50%); color: var(--gold); background: #060a13; padding: 2px 0; animation: blink 2s ease-in-out infinite; }
     .stats { display: flex; gap: 1.6rem; margin: .8rem 0 0 0; flex-wrap: wrap; }
     .stat b { font-size: 1.5rem; color: var(--gold); display: block; line-height: 1.1; }
-    .stat span { color: #8b949e; font-size: .78rem; letter-spacing: .06em; }
+    .stat span { color: #9aa4b2; font-size: .78rem; letter-spacing: .06em; }
 
     .pipe { display: flex; align-items: center; gap: .4rem; margin: .4rem 0 1rem 0; flex-wrap: wrap; }
     .pipe-n { padding: 5px 12px; border: 1px solid #262c34; border-radius: 999px; background: #10151f;
@@ -318,10 +356,11 @@ BRAND_CSS = """
     .scan-radar .b1 { top: 16px; left: 62px; } .scan-radar .b2 { top: 66px; left: 22px; animation-delay: .5s; }
     .scan-body { flex: 1; }
     .scan-title { font-weight: 800; letter-spacing: .18em; color: var(--gold); font-size: .85rem; }
-    .scan-steps { margin-top: .5rem; color: #9aa4b2; font-size: .88rem; }
+    .scan-steps { margin-top: .5rem; color: #b6bfcb; font-size: .88rem; }
     .scan-steps span { display: inline-block; margin-right: 1.1rem; animation: blink 1.2s ease-in-out infinite; }
     .scan-steps span:nth-child(2) { animation-delay: .25s; } .scan-steps span:nth-child(3) { animation-delay: .5s; }
     .scan-steps span:nth-child(4) { animation-delay: .75s; } .scan-steps span:nth-child(5) { animation-delay: 1s; }
+    .scan-steps span:nth-child(6) { animation-delay: 1.25s; }
     .scan-bar { margin-top: .8rem; height: 4px; border-radius: 4px; background: #1a2130; overflow: hidden; }
     .scan-bar::after { content: ""; display: block; height: 100%; width: 35%; border-radius: 4px;
         background: linear-gradient(90deg, transparent, var(--gold), transparent); animation: slide 1.2s ease-in-out infinite; }
@@ -333,8 +372,8 @@ BRAND_CSS = """
         justify-content: center; font-size: 1.8rem; border: 2px solid var(--kc);
         box-shadow: 0 0 16px -4px var(--kc); animation: stamp .6s cubic-bezier(.2,1.4,.4,1) both; }
     .kind-k { font-size: .68rem; letter-spacing: .2em; color: #8b949e; font-weight: 700; }
-    .kind-t { font-size: 1.15rem; font-weight: 800; color: #f4f6fa; }
-    .kind-s { color: #9aa4b2; font-size: .85rem; margin-top: .1rem; }
+    .kind-t { font-size: 1.15rem; font-weight: 800; color: #f4f6fa; animation: curtain .8s ease both; }
+    .kind-s { color: #b6bfcb; font-size: .85rem; margin-top: .1rem; }
     .kind-ev { display: flex; flex-wrap: wrap; gap: .4rem; margin-top: .5rem; }
     .kind-ev span { padding: 2px 10px; border: 1px solid #262c34; border-radius: 999px; background: #10151f;
         color: #c9d1d9; font-size: .74rem; animation: fadeUp .5s ease both; }
@@ -360,20 +399,22 @@ BRAND_CSS = """
     .sr-ring::after { content: ""; position: absolute; inset: -2px; border-radius: 50%; border: 2px solid var(--c);
         animation: ripple 2.4s ease-out infinite; }
     .sr-kicker { font-size: .7rem; letter-spacing: .22em; color: #8b949e; font-weight: 600; }
-    .sr-head { font-size: 2.1rem; font-weight: 800; color: var(--c); line-height: 1.15; margin: .15rem 0 .4rem 0; }
+    .sr-head { font-size: 2.1rem; font-weight: 800; color: var(--c); line-height: 1.15; margin: .15rem 0 .4rem 0;
+        animation: curtain .8s ease both; }
     .sr-sub { color: #d8dde3; font-size: 1.02rem; line-height: 1.5; }
     .sr-badge { display: inline-block; margin-top: .7rem; padding: 3px 12px; border-radius: 999px;
         border: 1px solid var(--c); color: var(--c); font-size: .75rem; font-weight: 700; letter-spacing: .05em; }
     .sr-list { margin: .6rem 0 0 0; }
     .sr-item { display: flex; gap: .8rem; align-items: flex-start; padding: .7rem 1rem; margin-bottom: .5rem;
-        border: 1px solid #262c34; border-radius: 10px; background: #10151f; animation: fadeUp .5s ease both; transition: all .2s; }
+        border: 1px solid #262c34; border-radius: 10px; background: #10151f; color: #d8dde3;
+        animation: fadeUp .5s ease both; transition: all .2s; }
     .sr-item:hover { border-color: var(--gold); transform: translateX(6px); }
     .sr-item .i { font-size: 1.3rem; }
     .sr-step { padding: .55rem 1rem; margin-bottom: .4rem; border-left: 3px solid var(--gold); background: #10151f;
         border-radius: 0 8px 8px 0; color: #d8dde3; animation: fadeUp .5s ease both; }
-    .sr-note { color: #8b949e; font-size: .8rem; margin-top: .8rem; }
+    .sr-note { color: #9aa4b2; font-size: .8rem; margin-top: .8rem; }
 
-    .lamps { display: grid; grid-template-columns: repeat(auto-fit, minmax(140px, 1fr)); gap: .7rem; margin: .5rem 0 1rem 0; }
+    .lamps { display: grid; grid-template-columns: repeat(auto-fit, minmax(135px, 1fr)); gap: .7rem; margin: .5rem 0 1rem 0; }
     .lamp { position: relative; text-align: center; padding: .8rem .5rem; border: 1px solid #262c34; border-radius: 12px;
         background: #0d121c; animation: fadeUp .6s ease both; transition: all .25s; }
     .lamp:hover { transform: translateY(-3px); }
@@ -384,46 +425,24 @@ BRAND_CSS = """
     .lamp.off .bulb, .lamp.skip .bulb { box-shadow: none; opacity: .45; filter: grayscale(1); }
     .lamp.skip .bulb { border-style: dashed; }
     .lamp .ln { font-weight: 700; font-size: .85rem; color: #f4f6fa; }
-    .lamp .lt { font-size: .74rem; color: #8b949e; margin-top: .15rem; line-height: 1.3; }
+    .lamp .lt { font-size: .74rem; color: #9aa4b2; margin-top: .15rem; line-height: 1.3; }
     .lamp.on, .lamp.alert, .lamp.hint { border-color: var(--lc); }
     .lamp.on::before, .lamp.alert::before, .lamp.hint::before { content: ""; position: absolute; top: 30px; left: 50%;
         width: 6px; height: 6px; border-radius: 50%; background: var(--lc); pointer-events: none;
         --dx: -34px; --dy: -22px; animation: sparkle .9s ease-out .35s both; box-shadow: 30px 6px 0 var(--lc), 62px -8px 0 var(--lc); }
 
-    @media (prefers-reduced-motion: reduce) { *, *::before, *::after { animation: none !important; transition: none !important; } }
+    @media (prefers-reduced-motion: reduce) { *, *::before, *::after { animation: none !important; transition: none !important; }
+        .stApp > header::before { display: none; } }
     @media (max-width: 700px) {
-        .sr-hero { flex-direction: column; text-align: center; } .lp-h { font-size: 1.8rem; }
-        .scan-card { flex-direction: column; text-align: center; }
+        .block-container { padding: 3.5rem .9rem 3rem !important; }
+        .sr-hero { flex-direction: column; text-align: center; } .lp-h { font-size: 1.7rem; } .sr-head { font-size: 1.6rem; }
+        .scan-card { flex-direction: column; text-align: center; } .bq-title { font-size: 1.4rem; }
         .how-step, .how-step:first-child, .how-step:last-child { border-radius: 12px; margin-bottom: .5rem; }
-        .how-step:not(:last-child)::after { display: none; }
+        .how-step:not(:last-child)::after { display: none; } .radar { display: none; }
     }
 </style>
 """.replace("__GOLD__", GOLD).replace("__BLUE__", BLUE)
 st.markdown(BRAND_CSS, unsafe_allow_html=True)
-EXTRA_CSS = """
-<style>
-    @keyframes topbar { 0% { transform: translateX(-100%); } 100% { transform: translateX(100%); } }
-    @keyframes borderflow { to { background-position: 300% 0; } }
-    @keyframes ripplebtn { from { box-shadow: 0 0 0 0 rgba(227,176,75,.5); } to { box-shadow: 0 0 0 14px rgba(227,176,75,0); } }
-    @keyframes curtain { from { clip-path: inset(0 100% 0 0); } to { clip-path: inset(0 0 0 0); } }
-    @keyframes bob { 0%, 100% { transform: translateY(0); } 50% { transform: translateY(-6px); } }
-    .stApp::selection { background: rgba(227,176,75,.35); }
-    [data-testid="stStatusWidget"] { display: none; }
-    .stApp > header::before { content: ""; position: fixed; top: 0; left: 0; right: 0; height: 3px; z-index: 99999;
-        background: linear-gradient(90deg, transparent, #e3b04b, #2ea36b, transparent); animation: topbar 2.4s ease-in-out infinite; }
-    .stButton > button:active, [data-testid="stFormSubmitButton"] > button:active { animation: ripplebtn .5s ease-out; }
-    [data-testid="stFileUploaderDropzone"]:hover { background: linear-gradient(90deg, rgba(227,176,75,.10), rgba(46,163,107,.10), rgba(227,176,75,.10));
-        background-size: 300% 100%; animation: borderflow 3s linear infinite; }
-    .sr-head, .kind-t { animation: curtain .8s ease both; }
-    .sr-ring, .kind-ic { animation-fill-mode: both; }
-    .fcard .ic { animation: bob 4s ease-in-out infinite; }
-    .fcard:nth-child(2) .ic { animation-delay: .5s; } .fcard:nth-child(3) .ic { animation-delay: 1s; }
-    .fcard:nth-child(4) .ic { animation-delay: 1.5s; } .fcard:nth-child(5) .ic { animation-delay: 2s; }
-    html { scroll-behavior: smooth; }
-    @media (prefers-reduced-motion: reduce) { .stApp > header::before { display: none; } }
-</style>
-"""
-st.markdown(EXTRA_CSS, unsafe_allow_html=True)
 
 
 def background_html(count: int = 14) -> str:
@@ -477,17 +496,18 @@ def render_landing(kind: str) -> None:
     rot = ""
     if kind == "image":
         kicker, headline = "IMAGE CHECK", "Is this picture <em>what it claims</em> to be?"
-        text = ("Drop in a picture. VERIQ looks for hidden creation labels, camera details, "
+        text = ("Drop in a picture. VERIQ looks for hidden creation labels, camera details, pixel clues, "
                 "text and earlier sightings, then explains what it found in plain words.")
         rot = ('<div class="rotline">Spots: <span class="rot"><span class="rot-in"><b>AI labels</b>'
                "<b>Camera photos</b><b>Screenshots</b><b>WhatsApp copies</b></span></span></div>")
         cards = [("🤖", "AI labels", "Reads a file's own hidden AI-creation label."),
                  ("📷", "Camera clues", "Finds camera and editing-app details."),
                  ("💬", "File kind", "Spots WhatsApp copies and screenshots."),
+                 ("🔬", "Pixel forensics", "Grain, detail and pattern clues that survive screenshots."),
                  ("🧬", "Copy spotting", "Recognises copies of images you checked."),
                  ("🔤", "Text reading", "Reads words inside the picture.")]
         steps = [("Drop", "Upload a JPG, PNG or WebP picture."),
-                 ("Scan", "VERIQ checks labels, camera info, file kind, text and look-alikes."),
+                 ("Scan", "VERIQ checks labels, camera info, file kind, pixels, text and look-alikes."),
                  ("Understand", "You get a plain answer, clue lamps and next steps.")]
     else:
         kicker, headline = "POST CHECK", "Is this post <em>worth believing</em>?"
@@ -547,18 +567,31 @@ def render_kind(kind) -> None:
         f'<div class="kind-ev">{chips}</div></div></div>', unsafe_allow_html=True)
 
 
-def render_clues(clues: list) -> None:
+def render_clues(clues: list, heading: str = "Clue Lamps", caption: Optional[str] = None) -> None:
     if not clues:
         return
-    st.markdown("#### Clue Lamps")
+    st.markdown(f"#### {heading}")
     lamps = "".join(
         f'<div class="lamp {html.escape(state)}" style="--lc:{LAMP_COLOURS.get(state, "#8b949e")};'
         f'animation-delay:{i * 0.1:.1f}s"><div class="bulb">{html.escape(icon)}</div>'
         f'<div class="ln">{html.escape(name)}</div><div class="lt">{html.escape(note)}</div></div>'
         for i, (icon, name, state, note) in enumerate(clues))
     st.markdown(f'<div class="lamps">{lamps}</div>', unsafe_allow_html=True)
-    st.caption("Lit lamps are clues that were found. Dim lamps mean nothing was found or the "
+    st.caption(caption or "Lit lamps are clues that were found. Dim lamps mean nothing was found or the "
                "check was not run. A dim lamp never means the picture is real.")
+
+
+def render_pixel(pixel) -> None:
+    if pixel is None:
+        return
+    if pixel.status != config.STATUS_COMPLETED:
+        st.caption(f"Pixel forensics: {pixel.status}. {pixel.error or ''}")
+        return
+    state = {pixel_forensics.AI: simple_result.HINT, pixel_forensics.CAMERA: simple_result.ON,
+             pixel_forensics.NEUTRAL: simple_result.OFF}
+    clues = [(s.icon, s.name, state.get(s.lean, simple_result.OFF), s.note) for s in pixel.signals]
+    render_clues(clues, heading="Pixel Clues",
+                 caption=f"Reliability: {pixel.reliability}. " + " ".join(pixel.notes))
 
 
 def render_simple(result, preview: Optional[bytes] = None, heading: str = "Result",
@@ -721,6 +754,15 @@ def analyze_image(data: bytes, filename: str, remember: bool, use_ai: bool) -> d
     if hashes.status == config.STATUS_COMPLETED:
         comparison = get_local_comparison(hashes, validation, info, remember, origin)
 
+    pixel = None
+    if not origin:
+        pix_cache = st.session_state.setdefault("veriq_pix", {})
+        pkey = f"{sha}:{kind.key}"
+        if pkey not in pix_cache:
+            pix_cache[pkey] = pixel_forensics.analyze(data, kind.key)
+            _trim(pix_cache)
+        pixel = pix_cache[pkey]
+
     ai_hint = None
     if use_ai and not origin and ai_indicator.available():
         ai_cache = st.session_state.setdefault("veriq_ai", {})
@@ -730,12 +772,13 @@ def analyze_image(data: bytes, filename: str, remember: bool, use_ai: bool) -> d
         ai_hint = ai_cache[sha]
 
     return {"error": None, "data": data, "validation": validation, "info": info, "meta": meta,
-            "ocr": ocr, "hashes": hashes, "comparison": comparison, "ai_hint": ai_hint, "kind": kind}
+            "ocr": ocr, "hashes": hashes, "comparison": comparison, "ai_hint": ai_hint,
+            "kind": kind, "pixel": pixel}
 
 
 def scanning_steps(use_ai: bool) -> list:
-    steps = ["Hidden labels", "Camera info", "File kind", "Text", "Similar images"]
-    return steps + (["Pixel check"] if use_ai else [])
+    steps = ["Hidden labels", "Camera info", "File kind", "Pixels", "Text", "Similar images"]
+    return steps + (["AI models"] if use_ai else [])
 
 
 # ------------------------------------------------ technical report sections
@@ -942,17 +985,20 @@ def render_image_technical(bundle: dict, with_report: bool) -> None:
 def show_image_result(bundle: dict, heading: str = "Result") -> None:
     render_kind(bundle["kind"])
     result = simple_result.simplify(bundle["meta"], bundle["ocr"], bundle["comparison"],
-                                    bundle["ai_hint"], bundle["kind"])
+                                    bundle["ai_hint"], bundle["kind"], bundle["pixel"])
     render_simple(result, bundle["data"], heading=heading)
+    render_pixel(bundle["pixel"])
     hint = bundle["ai_hint"]
     if hint is not None and hint.status != config.STATUS_COMPLETED:
-        st.caption(f"AI-pixel check: {hint.status}. {hint.error or ''}")
-    render_place(bundle["meta"])
+        st.caption(f"AI model check: {hint.status}. {hint.error or ''}")
     if hint is not None and hint.status == config.STATUS_COMPLETED:
         said = "; ".join(f"{name}: {ai_indicator.LEVEL_TEXT.get(level, level)}" for name, level in hint.details)
-        st.caption(f"AI-pixel check, model by model: {said}. Weak hint, often wrong on screenshots and WhatsApp copies.")
+        st.caption(f"AI model check, model by model: {said}. Weak hint, often wrong on screenshots and WhatsApp copies.")
         for note in hint.notes:
             st.caption(note)
+    if bundle["pixel"] is not None and hint is None and not ai_indicator.available():
+        st.caption("The optional AI-model check is not installed here. The pixel clues above still ran.")
+    render_place(bundle["meta"])
 
 
 # ------------------------------------------------------------ Mode: image
@@ -976,9 +1022,10 @@ def render_image_mode(remember: bool, use_ai: bool) -> None:
             st.markdown(f"- {message}")
         return
 
-    st.markdown(pipeline_html(["Upload", "Labels", "Camera", "File kind", "Text"] +
+    st.markdown(pipeline_html(["Upload", "Labels", "Camera", "File kind"] +
+                              (["Pixels"] if bundle["pixel"] is not None else []) + ["Text"] +
                               (["Look-alikes"] if bundle["comparison"] is not None else []) +
-                              (["Pixels"] if bundle["ai_hint"] is not None else []) + ["Answer"]),
+                              (["AI models"] if bundle["ai_hint"] is not None else []) + ["Answer"]),
                 unsafe_allow_html=True)
     show_image_result(bundle)
 
@@ -1179,7 +1226,7 @@ def clear_local_history() -> None:
     except sqlite3.Error:
         st.error("The local history could not be cleared.")
         return
-    for key in ("veriq_cmp", "veriq_saved", "veriq_base", "veriq_ai", "veriq_forensic"):
+    for key in ("veriq_cmp", "veriq_saved", "veriq_base", "veriq_ai", "veriq_forensic", "veriq_pix"):
         st.session_state.pop(key, None)
     st.success(f"Cleared {removed} stored fingerprint(s). Re-upload an image to refresh results.")
 
@@ -1237,7 +1284,7 @@ def main() -> None:
                                "said about itself, never the image.")
     use_ai = False
     if ai_indicator.available():
-        use_ai = c2.checkbox("Also run the experimental AI-pixel check (models must agree)", value=False,
+        use_ai = c2.checkbox("Also run the AI-model check (models must agree)", value=False,
                              help="Weak and often wrong on screenshots. Runs locally; first use downloads models.")
         if use_ai and not st.session_state.get("veriq_warm"):
             st.session_state["veriq_warm"] = True

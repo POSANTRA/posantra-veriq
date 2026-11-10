@@ -1,4 +1,4 @@
-"""POSANTRA | VERIQ - experimental AI-pixel indicator (ensemble).
+"""POSANTRA | VERIQ - experimental AI-pixel indicator (neural ensemble).
 
 LOW RELIABILITY, especially on screenshots and messaging-app copies. 'Leans AI'
 needs EVERY model that ran to agree; any disagreement is 'unsure'. A hint only:
@@ -29,14 +29,14 @@ _loaded: dict = {}
 
 @dataclass
 class AIIndicator:
-    status: str                       # Completed / Not available / Failed
+    status: str
     level: str = ""
     model: str = ""
     error: Optional[str] = None
     votes_ai: int = 0
     votes_total: int = 0
-    details: list = field(default_factory=list)   # [(model name, level)]
-    notes: list = field(default_factory=list)     # models that could not run
+    details: list = field(default_factory=list)
+    notes: list = field(default_factory=list)
 
 
 def available() -> bool:
@@ -91,7 +91,6 @@ def _pipeline(model_id: str):
 
 
 def warm() -> None:
-    """Load models in the background so the first scan is not delayed. Never raises."""
     if not available():
         return
     for mid in model_ids():

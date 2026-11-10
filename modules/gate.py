@@ -1,8 +1,8 @@
 """POSANTRA | VERIQ - optional password gate and simple scan rate limit.
 
-The gate is active only if VERIQ_PASSWORD is set (Streamlit secrets or an
-environment variable). Per-session limits can be bypassed by opening a new
-session; real abuse protection needs a proxy in front of the app.
+Active only if VERIQ_PASSWORD is set (Streamlit secrets or environment).
+Per-session limits can be bypassed by opening a new session; real abuse
+protection needs a proxy in front of the app.
 """
 from __future__ import annotations
 
@@ -25,7 +25,6 @@ def _password() -> str:
 
 
 def require_access() -> None:
-    """Show a password box and stop the page until the right password is entered."""
     expected = _password()
     if not expected or st.session_state.get("veriq_ok"):
         return
@@ -53,7 +52,6 @@ def require_access() -> None:
 
 
 def allow_scan(limit: int = 15, window: int = 600) -> bool:
-    """Allow at most `limit` new scans per session in `window` seconds."""
     now = time.time()
     stamps = [t for t in st.session_state.get("veriq_scans", []) if now - t < window]
     if len(stamps) >= limit:

@@ -1,9 +1,10 @@
 """POSANTRA | VERIQ - plain-language result (presentation logic only).
 
 Never says an image is 'real'. Says 'made by AI' only when the file itself
-declares it. For files that lost their information it can name the kind of file
-(WhatsApp copy, screenshot), report a likely copy of an image seen before, or a
-weak experimental pixel hint, always as a clue and never as proof.
+declares it. For files that lost their information it can name the kind of file,
+report a likely copy of an image seen before, or combine weak pixel clues and
+the experimental neural check. 'Probably AI-made' needs BOTH to agree, and is
+still a hint, never proof.
 """
 from __future__ import annotations
 
@@ -66,12 +67,15 @@ def summary_text(result: SimpleResult) -> str:
     return "\n".join(lines)
 
 
-def _clues(cc, make, model, comparison, ocr, ai_hint, match, kind) -> list:
+def _pixel_done(pixel) -> bool:
+    return pixel is not None and getattr(pixel, "status", "") == config.STATUS_COMPLETED
+
+
+def _clues(cc, make, model, comparison, ocr, ai_hint, match, kind, pixel) -> list:
     out = []
     if kind is not None:
         known = getattr(kind, "key", "unknown") != "unknown"
-        out.append((kind.icon, "Kind of file", ON if known else OFF,
-                    kind.label if known else "Not clear"))
+        out.append((kind.icon, "Kind of file", ON if known else OFF, kind.label if known else "Not clear"))
     if cc:
         out.append(("🔖", "Creation label", ALERT if _declares_ai(cc) else ON,
                     "Says AI made it" if _declares_ai(cc) else "Found, no AI mention"))
@@ -83,20 +87,28 @@ def _clues(cc, make, model, comparison, ocr, ai_hint, match, kind) -> list:
     out.append(("🧬", "Seen before", ON if seen else OFF, "Matches an earlier check" if seen else "No match"))
     has_text = bool(ocr is not None and getattr(ocr, "text", ""))
     out.append(("🔤", "Text in picture", ON if has_text else OFF, "Readable text found" if has_text else "No text read"))
+    if not _pixel_done(pixel):
+        out.append(("🔬", "Pixel forensics", SKIP, "Not run"))
+    elif pixel.level == "leans_ai":
+        out.append(("🔬", "Pixel forensics", HINT, f"{pixel.ai_count} AI-like clues (weak)"))
+    elif pixel.level == "camera_like":
+        out.append(("🔬", "Pixel forensics", ON, "Camera-like grain (weak)"))
+    else:
+        out.append(("🔬", "Pixel forensics", OFF, "Mixed or unclear"))
     done = ai_hint is not None and getattr(ai_hint, "status", "") == config.STATUS_COMPLETED
     if not done:
-        out.append(("🧪", "AI-pixel check", SKIP, "Not run"))
+        out.append(("🧪", "AI model check", SKIP, "Not run"))
     elif ai_hint.level == "leans_ai":
         n = getattr(ai_hint, "votes_total", 0)
-        out.append(("🧪", "AI-pixel check", HINT, f"All {n} models leaned AI (weak)" if n > 1 else "Leaned AI (weak)"))
+        out.append(("🧪", "AI model check", HINT, f"All {n} models leaned AI (weak)" if n > 1 else "Leaned AI (weak)"))
     elif ai_hint.level == "no_signs":
-        out.append(("🧪", "AI-pixel check", OFF, "No clear signs (proves nothing)"))
+        out.append(("🧪", "AI model check", OFF, "No clear signs (proves nothing)"))
     else:
-        out.append(("🧪", "AI-pixel check", OFF, "Undecided"))
+        out.append(("🧪", "AI model check", OFF, "Undecided"))
     return out
 
 
-def simplify(meta, ocr=None, comparison=None, ai_hint=None, kind=None) -> SimpleResult:
+def simplify(meta, ocr=None, comparison=None, ai_hint=None, kind=None, pixel=None) -> SimpleResult:
     usable = meta is not None and getattr(meta, "status", None) == config.STATUS_COMPLETED
     cc = getattr(meta, "content_credentials", None) if usable else None
     found = (getattr(meta, "found", None) or {}) if usable else {}
@@ -104,7 +116,7 @@ def simplify(meta, ocr=None, comparison=None, ai_hint=None, kind=None) -> Simple
     software = found.get(ma.SOFTWARE_LABEL, "")
     edited = bool(software) and any(n in software.lower() for n in ma._NOTABLE_SOFTWARE)
     match = _labelled_copy_match(comparison)
-    clues = _clues(cc, make, model, comparison, ocr, ai_hint, match, kind)
+    clues = _clues(cc, make, model, comparison, ocr, ai_hint, match, kind, pixel)
     lost = bool(kind is not None and getattr(kind, "lost_info", False))
 
     bullets: list = []
@@ -185,29 +197,53 @@ def simplify(meta, ocr=None, comparison=None, ai_hint=None, kind=None) -> Simple
             "label. This copy lost it. It is a hint, not proof.",
             "Likely, not proof", AMBER, bullets, search_steps, clues)
 
+    # ---- no label of its own: combine pixel clues and the neural check
     prefix = f"{kind.label}, so its hidden labels are likely gone. " if lost else ""
-    hint_done = ai_hint is not None and getattr(ai_hint, "status", "") == config.STATUS_COMPLETED
-    if hint_done and ai_hint.level == "no_signs":
-        bullets.append(("🧪", "The experimental AI check saw no clear signs. This proves nothing: "
-                              "it often misses AI images, especially screenshots."))
-    elif hint_done and ai_hint.level == "unsure":
-        bullets.append(("🧪", "The experimental AI check could not decide, or its models disagreed."))
-    if hint_done and ai_hint.level == "leans_ai":
+    pix = _pixel_done(pixel)
+    if pix:
+        for s in pixel.signals:
+            if s.lean != "neutral":
+                bullets.append(("🔬", f"{s.name}: {s.note}"))
+        if pixel.reliability == "low":
+            bullets.append(("⚠️", "The picture is small or heavily compressed, so pixel clues are less reliable."))
+    neural_done = ai_hint is not None and getattr(ai_hint, "status", "") == config.STATUS_COMPLETED
+    neural_ai = neural_done and ai_hint.level == "leans_ai"
+    neural_none = neural_done and ai_hint.level == "no_signs"
+    if neural_done and ai_hint.level == "unsure":
+        bullets.append(("🧪", "The AI models could not decide, or disagreed."))
+    if neural_none:
+        bullets.append(("🧪", "The AI models saw no clear signs. This proves nothing: they often miss AI images."))
+    if neural_ai:
         n = getattr(ai_hint, "votes_total", 0)
-        who = f"All {n} experimental AI models agreed" if n > 1 else f"An experimental AI check ({ai_hint.model})"
-        bullets.insert(0, ("🧪", f"{who} leaned towards 'AI-made'. These checks are often wrong, "
-                                 "especially on screenshots and WhatsApp copies."))
+        who = f"All {n} AI models agreed" if n > 1 else f"The AI model ({ai_hint.model})"
+        bullets.insert(0, ("🧪", f"{who} leaned towards 'AI-made'. This is often wrong on screenshots and WhatsApp copies."))
+    pix_ai = pix and pixel.level == "leans_ai"
+    pix_some = pix and pixel.ai_count >= 2
+    pix_cam = pix and pixel.level == "camera_like"
+
+    if neural_ai and pix_some:
+        return SimpleResult(
+            "ai_probable", "🤖", "Probably AI-made (hints agree)",
+            prefix + "The pixel clues and the AI models both point towards AI. That is a stronger "
+            "hint than either alone, but it is still not proof, and edited or heavily compressed "
+            "real photos can look like this.",
+            "Several hints agree, not proof", RED, bullets, search_steps, clues)
+    if neural_ai or pix_ai:
         return SimpleResult(
             "ai_hint", "🧪", "Might be AI-made (unsure)",
-            prefix + "VERIQ checked the pixels with experimental models. They leaned towards AI, "
-            "but this kind of check is often wrong and real photos can trigger it. Treat it as a "
+            prefix + "Some weak signals lean towards AI, but this kind of check is often wrong, "
+            "and real photos with filters or heavy compression can trigger it. Treat it as a "
             "reason to look further, not as an answer.",
-            "Weak hint, models agree, often wrong" if n > 1 else "Weak hint, often wrong",
-            AMBER, bullets, search_steps, clues)
-
+            "Weak hint, often wrong", AMBER, bullets, search_steps, clues)
+    if pix_cam and not neural_ai:
+        return SimpleResult(
+            "no_ai_signs", "🔬", "No clear AI signs (can't confirm)",
+            prefix + "The pixels show camera-like grain and no strong AI clues. That is not proof "
+            "that the picture is real or untouched: AI images can be made to look like this.",
+            "Weak clue, not proof", GREY, bullets, search_steps, clues)
     return SimpleResult(
         "unknown", "❓", "Can't tell",
         prefix + "This image has lost its hidden information, which is normal for screenshots and "
-        "WhatsApp copies. From the file alone, nobody can honestly say whether it is AI-made "
-        "or a real photo.",
+        "WhatsApp copies, and its pixels give no clear answer. Nobody can honestly say from the "
+        "file alone whether it is AI-made or a real photo.",
         "Not enough to tell", GREY, bullets, search_steps, clues)
